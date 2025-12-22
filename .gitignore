@@ -1,0 +1,33 @@
+.DS_Store
+.env
+.env.local
+.env.*.local
+.vite
+node_modules/
+dist/
+build/
+coverage/
+coverage/lcov-report/
+.cache/
+.parcel-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+*.tgz
+*.tsbuildinfo
+.eslintcache
+.idea/
+.vscode/
+.history/
+local.env
+/.turbo
+/.turbo-build
+/.pnp
+/.pnp.js
+
+# Optional: ignore lock files (uncomment if desired)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
