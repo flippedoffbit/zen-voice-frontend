@@ -76,9 +76,8 @@ describe('signal/mediasoup normalization', () => {
         (socketClient.once as any).mockImplementation((event: string, cb: any) => {
             if (event === 'consumed') {
                 setTimeout(() => cb({
-                    id: 'consumer-1',
-                    producerId: 'producer-1',
-                    kind: 'audio',
+                    id: 'producer-1', // Normalized producer ID
+                    consumerId: 'consumer-1',
                     rtpParameters: { codecs: [ { mimeType: 'audio/opus' } ], encodings: [ { ssrc: 123 } ] }
                 }), 0);
             }
@@ -86,13 +85,13 @@ describe('signal/mediasoup normalization', () => {
         });
 
         // Act
-        const result = await consumeProducer(mockTransport, 'producer-1', 'room-1');
+        const result = await consumeProducer(mockTransport, 'producer-1', 'room-1', { codecs: [] });
 
         // Assert
         expect(socketClient.emit).toHaveBeenCalledWith('consume', {
-            transportId: 'recv-transport-1',
             producerId: 'producer-1',
-            roomId: 'room-1'
+            rtpCapabilities: { codecs: [] },
+            transportId: 'recv-transport-1'
         });
         expect(mockTransport.consume).toHaveBeenCalledWith({
             id: 'consumer-1',
@@ -117,9 +116,8 @@ describe('signal/mediasoup normalization', () => {
         (socketClient.once as any).mockImplementation((event: string, cb: any) => {
             if (event === 'consumed') {
                 setTimeout(() => cb({
-                    id: 'consumer-1',
-                    producerId: 'producer-1',
-                    kind: 'audio',
+                    id: 'producer-1',
+                    consumerId: 'consumer-1',
                     rtpParameters: {} // Empty
                 }), 0);
             }
@@ -127,7 +125,7 @@ describe('signal/mediasoup normalization', () => {
         });
 
         // Act
-        const result = await consumeProducer(mockTransport, 'producer-1', 'room-1');
+        const result = await consumeProducer(mockTransport, 'producer-1', 'room-1', { codecs: [] });
 
         // Assert
         expect(consoleWarnSpy).toHaveBeenCalledWith('[MediaSoup] Missing rtpParameters; skipping consumer', expect.any(Object));

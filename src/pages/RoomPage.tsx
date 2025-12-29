@@ -248,7 +248,7 @@ export default function RoomPage () {
             (async () => {
                 try {
                     console.log('[Room] Initializing MediaSoup for listening...');
-                    const { sendTransport: st, recvTransport: rt } = await initMediasoupForRoom(roomId);
+                    const { sendTransport: st, recvTransport: rt, device } = await initMediasoupForRoom(roomId);
                     setSendTransport(st);
                     setRecvTransport(rt);
                     console.log('[Room] MediaSoup initialized for listening');
@@ -257,7 +257,7 @@ export default function RoomPage () {
                     socketClient.on('new-producer', async (data: any) => {
                         console.log('[Room] Received new-producer event:', data);
                         try {
-                            const result = await consumeProducer(rt, data.producerId, roomId);
+                            const result = await consumeProducer(rt, data.producerId, roomId, (device as any).rtpCapabilities);
                             if (result) {
                                 remoteAudiosRef.current.push(result.audio); // Prevent GC
                                 console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);
