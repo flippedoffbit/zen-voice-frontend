@@ -284,8 +284,7 @@ export default function RoomPage () {
                                 consumerData.rtpParameters.codecs = [ {
                                     mimeType: 'audio/opus',
                                     clockRate: 48000,
-                                    channels: 2,
-                                    parameters: {},
+                                    channels: 2, payloadType: 111, parameters: {},
                                     rtcpFeedback: []
                                 } ];
                                 consumerData.rtpParameters.encodings = consumerData.rtpParameters.encodings || [ { ssrc: 123456 } ];
