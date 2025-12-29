@@ -39,9 +39,9 @@ export default function RoomPage () {
     useEffect(() => {
         console.log('[Room] Admin check triggered', { user, room });
         console.log('[Room] Full user object:', user);
-        const admin = room?.isAdmin || false;
+        const admin = room?.isAdmin || Boolean(user && room && String(user.id) === String(room.primaryAdminId));
         setIsAdmin(admin);
-        console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, finalIsAdmin: admin });
+        console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, calculatedAdmin: Boolean(user && room && String(user.id) === String(room.primaryAdminId)), finalIsAdmin: admin });
     }, [ user, room ]);
 
     useEffect(() => {
