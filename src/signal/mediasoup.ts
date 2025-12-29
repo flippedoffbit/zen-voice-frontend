@@ -30,13 +30,15 @@ export async function initMediasoupForRoom (roomId: string) {
     console.log('[MediaSoup] Requested send transport creation');
     const sendTransportOpts = await socketOnce<any>('transport-created');
     console.log('[MediaSoup] Send transport created:', sendTransportOpts);
-    // Map transportId to id for mediasoup
-    sendTransportOpts.id = sendTransportOpts.transportId;
+    // Normalize transport id for compatibility with stub/real payloads
+    const sendId = sendTransportOpts.transportId ?? sendTransportOpts.id ?? sendTransportOpts.transport_id;
+    sendTransportOpts.transportId = sendId;
+    sendTransportOpts.id = sendId;
 
     const sendTransport = mediasoupClient.createSendTransport(sendTransportOpts, {
         connect: async (dtlsParameters: any) => {
             console.log('[MediaSoup] Connecting transport with DTLS parameters');
-            // inform server to connect transport
+            // inform server to connect transport (use normalized id)
             socketClient.emit('connect-transport', { transportId: sendTransportOpts.transportId, dtlsParameters, roomId });
             await socketOnce<any>('transport-connected');
             console.log('[MediaSoup] Transport connected successfully');
@@ -45,8 +47,10 @@ export async function initMediasoupForRoom (roomId: string) {
             console.log('[MediaSoup] Producing', kind, 'with RTP parameters');
             socketClient.emit('produce', { transportId: sendTransportOpts.transportId, kind, rtpParameters, roomId });
             const produced = await socketOnce<any>('produced');
-            console.log('[MediaSoup] Producer created with ID:', produced.producerId);
-            return produced.producerId;
+            // normalize produced id
+            const producedId = produced?.producerId ?? produced?.id ?? produced?.producer_id;
+            console.log('[MediaSoup] Producer created with ID:', producedId);
+            return producedId;
         }
     });
 
@@ -55,8 +59,10 @@ export async function initMediasoupForRoom (roomId: string) {
     console.log('[MediaSoup] Requested receive transport creation');
     const recvTransportOpts = await socketOnce<any>('transport-created');
     console.log('[MediaSoup] Receive transport created:', recvTransportOpts);
-    // Map transportId to id for mediasoup
-    recvTransportOpts.id = recvTransportOpts.transportId;
+    // Normalize transport id for compatibility
+    const recvId = recvTransportOpts.transportId ?? recvTransportOpts.id ?? recvTransportOpts.transport_id;
+    recvTransportOpts.transportId = recvId;
+    recvTransportOpts.id = recvId;
 
     const recvTransport = mediasoupClient.createRecvTransport(recvTransportOpts, {
         connect: async (dtlsParameters: any) => {

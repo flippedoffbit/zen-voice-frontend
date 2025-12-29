@@ -2105,6 +2105,12 @@ VITE_SOCKET_URL=http://localhost:3000
 - Full login → join → speak → leave flow
 - Multi-user scenarios (mock second user)
 
+> Dev note: to exercise the email OTP flow end-to-end use the backend's FIXED_OTP mode for predictable OTPs. Example:
+>
+> 1. In the backend repo: `FIXED_OTP=1234 FIXED_OTP_EMAIL=test@example.com npm run dev`
+> 2. In the frontend repo: `npm run dev`
+> 3. Run Playwright tests (install Playwright first): `npx playwright test e2e/playwright/login.spec.ts`
+
 ---
 
 ## Appendix A: Type Definitions
