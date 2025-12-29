@@ -109,23 +109,35 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
     console.log('[MediaSoup] Emitted consume for producer:', producerId, 'on transport:', recvTransport.id);
 
     // Wait for consumer data
-    const consumerData = await socketOnce<{ id: string; producerId: string; kind: string; rtpParameters: any; }>('consumed');
-    console.log('[MediaSoup] Received consumed:', consumerData);
+    const payload = await socketOnce<any>('consumed');
+    console.log('[MediaSoup] Received consumed:', payload);
 
-    // Check if rtpParameters are provided
-    if (!consumerData.rtpParameters) {
-        console.warn('[MediaSoup] Missing rtpParameters in consumed response; cannot consume');
-        throw new Error('Missing rtpParameters');
+    // Normalize server payload
+    const id = payload.id ?? payload.consumerId;
+    if (!id || !payload.producerId) {
+        console.error('[MediaSoup] Missing id or producerId', payload);
+        throw new Error('Invalid consumer payload');
+    }
+
+    const rtpParams = payload.rtpParameters;
+    if (!rtpParams || Object.keys(rtpParams).length === 0) {
+        console.warn('[MediaSoup] Missing rtpParameters; skipping consumer', payload);
+        return; // Skip consuming, don't throw
     }
 
     // Consume the stream
-    const consumer = await recvTransport.consume(consumerData);
+    const consumer = await recvTransport.consume({
+        id,
+        producerId: payload.producerId,
+        kind: payload.kind || 'audio',
+        rtpParameters: rtpParams
+    });
     console.log('[MediaSoup] Consumer created:', consumer);
 
     // Create audio element and play
-    const stream = new MediaStream([ consumer.track ]);
+    const remoteStream = new MediaStream([ consumer.track ]);
     const audio = new Audio();
-    audio.srcObject = stream;
+    audio.srcObject = remoteStream;
     audio.volume = 1;
     await audio.play();
     console.log('[MediaSoup] Playing audio from producer');

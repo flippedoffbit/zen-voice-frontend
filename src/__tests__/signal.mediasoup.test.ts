@@ -109,23 +109,31 @@ describe('signal/mediasoup normalization', () => {
         expect(result.audio).toBe(mockAudio);
     });
 
-    it('throws error when rtpParameters are missing', async () => {
+    it('skips consuming when rtpParameters are empty', async () => {
         // Arrange
         const mockTransport = { id: 'recv-transport-1', consume: vi.fn() };
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         (socketClient.once as any).mockImplementation((event: string, cb: any) => {
             if (event === 'consumed') {
                 setTimeout(() => cb({
                     id: 'consumer-1',
                     producerId: 'producer-1',
-                    kind: 'audio'
-                    // no rtpParameters
+                    kind: 'audio',
+                    rtpParameters: {} // Empty
                 }), 0);
             }
             return Promise.resolve();
         });
 
-        // Act & Assert
-        await expect(consumeProducer(mockTransport, 'producer-1', 'room-1')).rejects.toThrow('Missing rtpParameters');
+        // Act
+        const result = await consumeProducer(mockTransport, 'producer-1', 'room-1');
+
+        // Assert
+        expect(consoleWarnSpy).toHaveBeenCalledWith('[MediaSoup] Missing rtpParameters; skipping consumer', expect.any(Object));
+        expect(mockTransport.consume).not.toHaveBeenCalled();
+        expect(result).toBeUndefined();
+
+        consoleWarnSpy.mockRestore();
     });
 });

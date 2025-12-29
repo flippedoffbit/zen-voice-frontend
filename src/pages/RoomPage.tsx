@@ -257,9 +257,11 @@ export default function RoomPage () {
                     socketClient.on('new-producer', async (data: any) => {
                         console.log('[Room] Received new-producer event:', data);
                         try {
-                            const { audio } = await consumeProducer(rt, data.producerId, roomId);
-                            remoteAudiosRef.current.push(audio); // Prevent GC
-                            console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);
+                            const result = await consumeProducer(rt, data.producerId, roomId);
+                            if (result) {
+                                remoteAudiosRef.current.push(result.audio); // Prevent GC
+                                console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);
+                            }
                         } catch (e) {
                             console.error('[Room] Failed to consume producer:', e);
                         }
