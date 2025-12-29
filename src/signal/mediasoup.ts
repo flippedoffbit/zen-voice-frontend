@@ -208,8 +208,9 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
 
     // CRITICAL: Use Web Audio API for Safari compatibility
     // Safari has issues with HTMLAudioElement for WebRTC streams
+    let audioContext: AudioContext | null = null;
     try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         console.log('[MediaSoup] AudioContext created:', {
             state: audioContext.state,
             sampleRate: audioContext.sampleRate,
@@ -245,14 +246,31 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         // Resume audio context if suspended (Safari requirement)
         if (audioContext.state === 'suspended') {
             console.log('[MediaSoup] AudioContext suspended, attempting to resume...');
-            await audioContext.resume();
-            console.log('[MediaSoup] AudioContext resumed:', audioContext.state);
+            try {
+                await audioContext.resume();
+                console.log('[MediaSoup] AudioContext resumed successfully. New state:', audioContext.state);
+
+                // Verify resume was successful
+                if (audioContext.state === 'suspended') {
+                    console.error('[MediaSoup] AudioContext still suspended! State:', audioContext.state);
+                    console.log('[MediaSoup] This may require user interaction. Click anywhere on the page.');
+                }
+            } catch (resumeError) {
+                console.error('[MediaSoup] Failed to resume AudioContext:', resumeError);
+            }
+        } else {
+            console.log('[MediaSoup] AudioContext already running:', audioContext.state);
         }
 
-        // Monitor audio levels to verify data is flowing
+        // Store reference globally for later resume attempts
+        (window as any).__mediasoupAudioContext = audioContext;
         let checkCount = 0;
         const monitorAudioLevel = () => {
             if (checkCount >= 20) return; // Stop after 20 checks
+            if (!audioContext) {
+                console.warn('[MediaSoup] AudioContext unavailable, stopping audio monitor');
+                return;
+            }
 
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
@@ -262,7 +280,7 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
                 average: average.toFixed(2),
                 max: max,
                 hasSignal: max > 0,
-                contextState: audioContext.state,
+                contextState: audioContext?.state || 'unknown',
                 trackEnabled: consumer.track.enabled,
                 trackMuted: consumer.track.muted,
                 trackReadyState: consumer.track.readyState

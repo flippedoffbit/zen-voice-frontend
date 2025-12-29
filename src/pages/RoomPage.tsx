@@ -97,8 +97,24 @@ export default function RoomPage () {
 
     // Set up user interaction listeners to enable audio playback
     useEffect(() => {
-        const handleUserInteraction = () => {
-            playPendingAudio();
+        const handleUserInteraction = async () => {
+            console.log('[Room] User interaction detected, attempting to resume AudioContext and play audio');
+
+            // Try to resume suspended AudioContext
+            try {
+                const audioCtx = (window as any).__mediasoupAudioContext;
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    console.log('[Room] Found suspended AudioContext, resuming...');
+                    await audioCtx.resume();
+                    console.log('[Room] AudioContext resumed to state:', audioCtx.state);
+                } else if (audioCtx) {
+                    console.log('[Room] AudioContext already in state:', audioCtx.state);
+                }
+            } catch (e) {
+                console.error('[Room] Error resuming AudioContext:', e);
+            }
+
+            await playPendingAudio();
         };
 
         // Listen for various user interactions that browsers accept for autoplay
