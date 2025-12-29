@@ -133,7 +133,7 @@ describe('signal/mediasoup normalization', () => {
         const tracks = mockAudio.srcObject?.getTracks();
         expect(tracks?.[ 0 ]).toEqual({ kind: 'audio', enabled: true });
         expect(mockAudio.play).toHaveBeenCalled();
-        expect(result.consumer.track).toEqual({ kind: 'audio' });
+        expect(result.consumer.track).toEqual({ kind: 'audio', enabled: true });
         expect(result.audio).toBe(mockAudio);
     });
 

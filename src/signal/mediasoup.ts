@@ -92,6 +92,60 @@ export async function startProducing (sendTransport: any) {
     const track = stream.getAudioTracks()[ 0 ];
     if (!track) throw new Error('No audio track');
     console.log('[MediaSoup] Audio track obtained:', track);
+    console.log('[MediaSoup] Audio track details:', {
+        id: track.id,
+        kind: track.kind,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+        label: track.label
+    });
+
+    // Monitor outgoing audio levels to verify we're sending data
+    try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        console.log('[MediaSoup] Producer AudioContext created:', {
+            state: audioContext.state,
+            sampleRate: audioContext.sampleRate
+        });
+
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        
+        source.connect(analyser);
+        
+        console.log('[MediaSoup] Producer audio monitoring established');
+
+        // Monitor audio levels from microphone
+        let checkCount = 0;
+        const monitorProducerAudioLevel = () => {
+            if (checkCount >= 20) return; // Stop after 20 checks
+            
+            analyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+            const max = Math.max(...Array.from(dataArray));
+            
+            console.log(`[MediaSoup] PRODUCER audio level check ${checkCount + 1}/20:`, {
+                average: average.toFixed(2),
+                max: max,
+                hasSignal: max > 0,
+                isSpeaking: max > 10, // Threshold for speech detection
+                trackEnabled: track.enabled,
+                trackMuted: track.muted,
+                trackReadyState: track.readyState
+            });
+            
+            checkCount++;
+            setTimeout(monitorProducerAudioLevel, 500);
+        };
+        
+        // Start monitoring immediately
+        setTimeout(monitorProducerAudioLevel, 100);
+    } catch (error) {
+        console.error('[MediaSoup] Failed to setup producer audio monitoring:', error);
+    }
 
     console.log('[MediaSoup] Producing audio track...');
     const producer = await sendTransport.produce({ track });
@@ -146,13 +200,86 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         label: consumer.track.label
     });
 
-    // Ensure consumer track is enabled
+    // Ensure consumer track is enabled and unmuted
     consumer.track.enabled = true;
 
     // Create audio element with Safari-specific attributes
     const remoteStream = new MediaStream([ consumer.track ]);
 
-    // For Safari, attach audio element to DOM (required for playback)
+    // CRITICAL: Use Web Audio API for Safari compatibility
+    // Safari has issues with HTMLAudioElement for WebRTC streams
+    try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        console.log('[MediaSoup] AudioContext created:', {
+            state: audioContext.state,
+            sampleRate: audioContext.sampleRate,
+            destination: !!audioContext.destination
+        });
+
+        // Create source from MediaStream
+        const source = audioContext.createMediaStreamSource(remoteStream);
+        
+        // Create analyser to monitor audio levels
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        
+        // Create gain node for volume control
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = 1.0;
+        
+        // Connect source -> analyser -> gain -> destination (speakers)
+        source.connect(analyser);
+        analyser.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        console.log('[MediaSoup] Web Audio API routing established:', {
+            sourceConnected: true,
+            gainValue: gainNode.gain.value,
+            contextState: audioContext.state,
+            streamActive: remoteStream.active,
+            trackEnabled: consumer.track.enabled,
+            trackMuted: consumer.track.muted
+        });
+
+        // Resume audio context if suspended (Safari requirement)
+        if (audioContext.state === 'suspended') {
+            console.log('[MediaSoup] AudioContext suspended, attempting to resume...');
+            await audioContext.resume();
+            console.log('[MediaSoup] AudioContext resumed:', audioContext.state);
+        }
+
+        // Monitor audio levels to verify data is flowing
+        let checkCount = 0;
+        const monitorAudioLevel = () => {
+            if (checkCount >= 20) return; // Stop after 20 checks
+            
+            analyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+            const max = Math.max(...Array.from(dataArray));
+            
+            console.log(`[MediaSoup] Audio level check ${checkCount + 1}/20:`, {
+                average: average.toFixed(2),
+                max: max,
+                hasSignal: max > 0,
+                contextState: audioContext.state,
+                trackEnabled: consumer.track.enabled,
+                trackMuted: consumer.track.muted,
+                trackReadyState: consumer.track.readyState
+            });
+            
+            checkCount++;
+            setTimeout(monitorAudioLevel, 500);
+        };
+        
+        // Start monitoring after a brief delay
+        setTimeout(monitorAudioLevel, 500);
+
+    } catch (webAudioError) {
+        console.error('[MediaSoup] Web Audio API failed, falling back to HTMLAudioElement:', webAudioError);
+    }
+
+    // Also create HTMLAudioElement as fallback/additional output
     const audio = document.createElement('audio');
     audio.srcObject = remoteStream;
     audio.volume = 1.0;
