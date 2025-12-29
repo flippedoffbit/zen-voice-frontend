@@ -35,6 +35,38 @@ export default function RoomPage () {
     const location = useLocation();
     const { user, loading } = useAuth();
 
+    // Function to retry playing audio elements after user interaction
+    const playPendingAudio = async () => {
+        for (const audio of remoteAudiosRef.current) {
+            if (audio.paused && audio.srcObject) {
+                try {
+                    await audio.play();
+                    console.log('[Room] Successfully played pending audio after user interaction');
+                } catch (error) {
+                    console.warn('[Room] Still unable to play audio:', error);
+                }
+            }
+        }
+    };
+
+    // Set up user interaction listeners to enable audio playback
+    useEffect(() => {
+        const handleUserInteraction = () => {
+            playPendingAudio();
+        };
+
+        // Listen for various user interactions that browsers accept for autoplay
+        document.addEventListener('click', handleUserInteraction);
+        document.addEventListener('touchstart', handleUserInteraction);
+        document.addEventListener('keydown', handleUserInteraction);
+
+        return () => {
+            document.removeEventListener('click', handleUserInteraction);
+            document.removeEventListener('touchstart', handleUserInteraction);
+            document.removeEventListener('keydown', handleUserInteraction);
+        };
+    }, []);
+
     // Keep isAdmin state in sync with latest room + user data. Use string compare to be robust.
     useEffect(() => {
         console.log('[Room] Admin check triggered', { user, room });
@@ -264,7 +296,9 @@ export default function RoomPage () {
                             const result = await consumeProducer(rt, data.producerId, roomId, device.rtpCapabilities);
                             if (result) {
                                 remoteAudiosRef.current.push(result.audio); // Prevent GC
-                                console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);
+                                console.log('[Room] Consumer created for producer, total audios:', remoteAudiosRef.current.length);
+                                // Try to play immediately, will work if user has already interacted
+                                playPendingAudio();
                             }
                         } catch (e) {
                             console.error('[Room] Failed to consume producer:', e);

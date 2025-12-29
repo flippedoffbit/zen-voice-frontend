@@ -137,13 +137,26 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
     });
     console.log('[MediaSoup] Consumer created:', consumer);
 
-    // Create audio element and play
+    // Create audio element
     const remoteStream = new MediaStream([ consumer.track ]);
     const audio = new Audio();
     audio.srcObject = remoteStream;
     audio.volume = 1;
-    await audio.play();
-    console.log('[MediaSoup] Playing audio from producer');
+
+    // Try to play audio, but handle browser autoplay restrictions
+    try {
+        await audio.play();
+        console.log('[MediaSoup] Playing audio from producer');
+    } catch (error) {
+        if (error instanceof DOMException && error.name === 'NotAllowedError') {
+            console.warn('[MediaSoup] Audio play blocked by browser autoplay policy. Audio will play after user interaction.');
+            // Audio element is created and ready, but won't play until user interacts
+            // This is expected behavior - browsers block autoplay without user interaction
+        } else {
+            console.error('[MediaSoup] Failed to play audio:', error);
+            throw error;
+        }
+    }
 
     return { consumer, audio };
 }
