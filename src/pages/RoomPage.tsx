@@ -276,6 +276,9 @@ export default function RoomPage () {
 
                             console.log('[Room] Received consumed:', consumerData);
 
+                            // Map consumerId to id for MediaSoup compatibility
+                            consumerData.id = consumerData.consumerId;
+
                             // Consume the stream
                             const consumer = await rt.consume(consumerData);
                             console.log('[Room] Consumer created:', consumer);
