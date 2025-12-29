@@ -78,6 +78,8 @@ describe('signal/mediasoup normalization', () => {
                 setTimeout(() => cb({
                     id: 'producer-1', // Normalized producer ID
                     consumerId: 'consumer-1',
+                    producerId: 'producer-1',
+                    kind: 'audio',
                     rtpParameters: { codecs: [ { mimeType: 'audio/opus' } ], encodings: [ { ssrc: 123 } ] }
                 }), 0);
             }
@@ -91,7 +93,8 @@ describe('signal/mediasoup normalization', () => {
         expect(socketClient.emit).toHaveBeenCalledWith('consume', {
             producerId: 'producer-1',
             rtpCapabilities: { codecs: [] },
-            transportId: 'recv-transport-1'
+            transportId: 'recv-transport-1',
+            roomId: 'room-1'
         });
         expect(mockTransport.consume).toHaveBeenCalledWith({
             id: 'consumer-1',
@@ -118,6 +121,8 @@ describe('signal/mediasoup normalization', () => {
                 setTimeout(() => cb({
                     id: 'producer-1',
                     consumerId: 'consumer-1',
+                    producerId: 'producer-1',
+                    kind: 'audio',
                     rtpParameters: {} // Empty
                 }), 0);
             }

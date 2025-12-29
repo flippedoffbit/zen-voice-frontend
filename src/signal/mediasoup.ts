@@ -99,13 +99,14 @@ export async function startProducing (sendTransport: any) {
     return { producer, stream };
 }
 
-export async function consumeProducer (recvTransport: any, producerId: string, _roomId: string, rtpCapabilities: any) {
+export async function consumeProducer (recvTransport: any, producerId: string, roomId: string, rtpCapabilities: any) {
     console.log('[MediaSoup] Consuming producer:', producerId);
     // Request consumer creation from server
     const consumeRequest: ConsumeRequest = {
         producerId,
         rtpCapabilities,
-        transportId: recvTransport.id
+        transportId: recvTransport.id,
+        roomId
     };
     socketClient.emit('consume', consumeRequest);
     console.log('[MediaSoup] Emitted consume for producer:', producerId, 'on transport:', recvTransport.id);
@@ -115,8 +116,8 @@ export async function consumeProducer (recvTransport: any, producerId: string, _
     console.log('[MediaSoup] Received consumed:', payload);
 
     // Validate response
-    if (!payload.consumerId || !payload.id) {
-        console.error('[MediaSoup] Missing consumerId or id', payload);
+    if (!payload.consumerId || !payload.id || !payload.producerId) {
+        console.error('[MediaSoup] Missing consumerId, id, or producerId', payload);
         throw new Error('Invalid consumer payload');
     }
 
@@ -129,8 +130,8 @@ export async function consumeProducer (recvTransport: any, producerId: string, _
     // Consume the stream
     const consumer = await recvTransport.consume({
         id: payload.consumerId,
-        producerId: payload.id, // Use the normalized producer ID from response
-        kind: 'audio', // Assume audio for now, could be extended
+        producerId: payload.producerId, // Use producerId from response
+        kind: payload.kind, // Use kind from response
         rtpParameters: rtpParams
     });
     console.log('[MediaSoup] Consumer created:', consumer);

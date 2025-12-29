@@ -10,6 +10,7 @@ export interface ConsumeRequest {
     producerId: string;        // ID of the producer to consume from
     rtpCapabilities: types.RtpCapabilities;  // Client's RTP capabilities (from device.rtpCapabilities)
     transportId: string;       // ID of the client-side transport
+    roomId: string;            // Room ID for context
     // Optional: paused?: boolean;  // If true, consumer starts paused
 }
 
@@ -17,6 +18,8 @@ export interface ConsumeRequest {
 export interface ConsumedResponse {
     id: string;                // Normalized producer ID (string)
     consumerId: string;        // Unique consumer ID from mediasoup
+    producerId: string;        // Producer ID for reference
+    kind: string;              // Media kind (e.g., "audio")
     rtpParameters: types.RtpParameters;  // Authoritative RTP parameters for the consumer
 }
 

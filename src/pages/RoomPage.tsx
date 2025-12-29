@@ -267,6 +267,16 @@ export default function RoomPage () {
                         }
                     });
 
+                    // Listen for consume-related errors
+                    socketClient.on('error', (error: any) => {
+                        console.error('[Room] Socket error during consume flow:', error);
+                        if (error.message && error.message.includes('roomId and producerId required')) {
+                            toast.error('Failed to consume audio stream: Missing required parameters');
+                        } else {
+                            toast.error(`Consume error: ${error.message || 'Unknown error'}`);
+                        }
+                    });
+
                 } catch (e) {
                     console.error('[Room] Failed to init MediaSoup for listening:', e);
                 }
