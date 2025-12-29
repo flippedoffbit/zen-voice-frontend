@@ -9,7 +9,7 @@ import { ChevronLeft, MoreVertical, Users, Mic, LogOut, Shield } from 'lucide-re
 import { ROUTES } from '../constants/routes';
 import { useAuth } from '../auth/AuthContext';
 import { toast } from 'react-hot-toast';
-import { getRooms, getRoom, Room } from '@/api/rooms';
+import { getRoom, Room } from '@/api/rooms';
 import RoomImageUpload from '@/components/room/RoomImageUpload';
 import { logger } from '../utils/logger';
 import { subscribe } from '../utils/appEvents';
@@ -55,19 +55,6 @@ export default function RoomPage () {
                     setRoom(data.room);
                     setListenerCount(data.room.listenerCount);
                     console.log('[Room] Room set:', data.room);
-                    // Check if user is admin by fetching rooms list (copying /voice page logic)
-                    getRooms().then(res => {
-                        console.log('[Room] getRooms response:', res);
-                        if (res.success) {
-                            const roomFromList = res.rooms.find(r => r.id === roomId);
-                            console.log('[Room] roomFromList:', roomFromList);
-                            if (roomFromList?.isAdmin) {
-                                setRoom(prev => prev ? { ...prev, isAdmin: true } : null);
-                            }
-                        }
-                    }).catch(() => {
-                        // ignore
-                    });
                     // We will set isAdmin from a dedicated effect to handle timing/type issues
                     if (process.env.NODE_ENV === 'development') console.log('[Room] fetched room', { roomId: data.room.id, primaryAdminId: data.room.primaryAdminId, name: data.room.name });
                 } else {
@@ -268,7 +255,7 @@ export default function RoomPage () {
 
                     // Listen for new producers to consume
                     socketClient.on('new-producer', async (data: any) => {
-                        console.log('[Room] New producer to consume:', data);
+                        console.log('[Room] Received new-producer event:', data);
                         try {
                             // Request consumer creation from server
                             socketClient.emit('consume', {
@@ -276,6 +263,7 @@ export default function RoomPage () {
                                 producerId: data.producerId,
                                 roomId
                             });
+                            console.log('[Room] Emitted consume for producer:', data.producerId, 'on transport:', rt.id);
 
                             // Wait for consumer data
                             const consumerData = await new Promise<any>((resolve) => {
@@ -286,7 +274,7 @@ export default function RoomPage () {
                                 socketClient.once('consumer-created', handler);
                             });
 
-                            console.log('[Room] Consumer data received:', consumerData);
+                            console.log('[Room] Received consumer-created:', consumerData);
 
                             // Consume the stream
                             const consumer = await rt.consume(consumerData);
