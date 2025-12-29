@@ -31,6 +31,7 @@ export default function RoomPage () {
     const [ localStream, setLocalStream ] = useState<MediaStream | null>(null);
     const [ joined, setJoined ] = useState(false);
     const connectedByThisPage = useRef(false);
+    const remoteAudiosRef = useRef<HTMLAudioElement[]>([]);
     const location = useLocation();
     const { user, loading } = useAuth();
 
@@ -38,9 +39,9 @@ export default function RoomPage () {
     useEffect(() => {
         console.log('[Room] Admin check triggered', { user, room });
         console.log('[Room] Full user object:', user);
-        const admin = room?.isAdmin || Boolean(user && room);
+        const admin = room?.isAdmin || false;
         setIsAdmin(admin);
-        console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, calculatedAdmin: Boolean(user && room), finalIsAdmin: admin });
+        console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, finalIsAdmin: admin });
     }, [ user, room ]);
 
     useEffect(() => {
@@ -54,14 +55,14 @@ export default function RoomPage () {
                     setRoom(data.room);
                     setListenerCount(data.room.listenerCount);
                     console.log('[Room] Room set:', data.room);
-                    // Check if user is admin by fetching rooms list
+                    // Check if user is admin by fetching rooms list (copying /voice page logic)
                     getRooms().then(res => {
                         console.log('[Room] getRooms response:', res);
                         if (res.success) {
                             const roomFromList = res.rooms.find(r => r.id === roomId);
                             console.log('[Room] roomFromList:', roomFromList);
                             if (roomFromList?.isAdmin) {
-                                setIsAdmin(true);
+                                setRoom(prev => prev ? { ...prev, isAdmin: true } : null);
                             }
                         }
                     }).catch(() => {
@@ -296,8 +297,9 @@ export default function RoomPage () {
                             const audio = new Audio();
                             audio.srcObject = stream;
                             audio.volume = 1; // Ensure volume
+                            remoteAudiosRef.current.push(audio); // Prevent GC
                             audio.play().catch(e => console.error('Failed to play audio:', e));
-                            console.log('[Room] Playing audio from producer');
+                            console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);
 
                         } catch (e) {
                             console.error('[Room] Failed to consume producer:', e);
@@ -362,6 +364,11 @@ export default function RoomPage () {
             socketClient.off('speak-request');
             socketClient.off('speak-request-cancelled');
             if (typeof offInsufficientFunds === 'function') offInsufficientFunds();
+            // Clean up remote audios
+            remoteAudiosRef.current.forEach(audio => {
+                try { audio.pause(); audio.srcObject = null; } catch (e) {}
+            });
+            remoteAudiosRef.current = [];
             // Close MediaSoup transports
             if (sendTransport) {
                 try { sendTransport.close && sendTransport.close(); } catch (e) {}
