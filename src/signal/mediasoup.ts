@@ -136,17 +136,64 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         rtpParameters: rtpParams
     });
     console.log('[MediaSoup] Consumer created:', consumer);
+    console.log('[MediaSoup] Consumer track:', consumer.track);
+    console.log('[MediaSoup] Consumer track details:', {
+        id: consumer.track.id,
+        kind: consumer.track.kind,
+        enabled: consumer.track.enabled,
+        muted: consumer.track.muted,
+        readyState: consumer.track.readyState,
+        label: consumer.track.label
+    });
 
-    // Create audio element
+    // Ensure consumer track is enabled
+    consumer.track.enabled = true;
+
+    // Create audio element with Safari-specific attributes
     const remoteStream = new MediaStream([ consumer.track ]);
-    const audio = new Audio();
+
+    // For Safari, attach audio element to DOM (required for playback)
+    const audio = document.createElement('audio');
     audio.srcObject = remoteStream;
-    audio.volume = 1;
+    audio.volume = 1.0;
+    audio.autoplay = true;
+    audio.controls = false; // Hide controls but keep in DOM
+    audio.setAttribute('playsinline', 'true'); // Important for iOS Safari
+    audio.muted = false;
+    audio.style.display = 'none'; // Hide but keep in DOM
+
+    // Append to body (required for Safari to actually play)
+    document.body.appendChild(audio);
+
+    console.log('[MediaSoup] Audio element created and attached to DOM:', {
+        srcObject: !!audio.srcObject,
+        volume: audio.volume,
+        muted: audio.muted,
+        paused: audio.paused,
+        readyState: audio.readyState,
+        parentElement: audio.parentElement?.tagName,
+        tracks: remoteStream.getTracks().map(t => ({
+            id: t.id,
+            kind: t.kind,
+            enabled: t.enabled,
+            muted: t.muted,
+            readyState: t.readyState,
+            label: t.label
+        }))
+    });
 
     // Try to play audio, but handle browser autoplay restrictions
     try {
-        await audio.play();
-        console.log('[MediaSoup] Playing audio from producer');
+        const playPromise = audio.play();
+        console.log('[MediaSoup] Play promise initiated');
+        await playPromise;
+        console.log('[MediaSoup] Audio playing successfully. State:', {
+            paused: audio.paused,
+            currentTime: audio.currentTime,
+            volume: audio.volume,
+            muted: audio.muted,
+            duration: audio.duration
+        });
     } catch (error) {
         if (error instanceof DOMException && error.name === 'NotAllowedError') {
             console.warn('[MediaSoup] Audio play blocked by browser autoplay policy. Audio will play after user interaction.');

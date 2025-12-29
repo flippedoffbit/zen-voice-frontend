@@ -69,8 +69,33 @@ describe('signal/mediasoup normalization', () => {
         const mockAudio = {
             srcObject: null,
             volume: 1,
-            play: vi.fn().mockResolvedValue(undefined)
+            autoplay: false,
+            muted: false,
+            paused: true,
+            readyState: 4,
+            currentTime: 0,
+            duration: 0,
+            controls: false,
+            style: { display: '' },
+            parentElement: null,
+            play: vi.fn().mockResolvedValue(undefined),
+            setAttribute: vi.fn()
         };
+
+        // Mock document methods
+        global.document = {
+            ...global.document,
+            createElement: vi.fn((tagName: string) => {
+                if (tagName === 'audio') {
+                    return mockAudio as any;
+                }
+                return {} as any;
+            }),
+            body: {
+                appendChild: vi.fn((node: any) => node)
+            } as any
+        } as any;
+
         global.Audio = vi.fn().mockImplementation(() => mockAudio);
         global.MediaStream = vi.fn().mockImplementation((tracks) => ({ getTracks: () => tracks }));
 
@@ -106,7 +131,7 @@ describe('signal/mediasoup normalization', () => {
         expect(mockAudio.srcObject).toEqual({ getTracks: expect.any(Function) });
 
         const tracks = mockAudio.srcObject?.getTracks();
-        expect(tracks?.[ 0 ]).toEqual({ kind: 'audio' });
+        expect(tracks?.[ 0 ]).toEqual({ kind: 'audio', enabled: true });
         expect(mockAudio.play).toHaveBeenCalled();
         expect(result.consumer.track).toEqual({ kind: 'audio' });
         expect(result.audio).toBe(mockAudio);

@@ -37,13 +37,59 @@ export default function RoomPage () {
 
     // Function to retry playing audio elements after user interaction
     const playPendingAudio = async () => {
+        console.log('[Room] Attempting to play all audio elements. Total:', remoteAudiosRef.current.length);
         for (const audio of remoteAudiosRef.current) {
-            if (audio.paused && audio.srcObject) {
+            console.log('[Room] Audio element state:', {
+                paused: audio.paused,
+                muted: audio.muted,
+                volume: audio.volume,
+                srcObject: !!audio.srcObject,
+                readyState: audio.readyState,
+                currentTime: audio.currentTime
+            });
+
+            if (audio.srcObject) {
+                // Get the tracks from the stream
+                const stream = audio.srcObject as MediaStream;
+                const tracks = stream.getTracks();
+
+                console.log('[Room] Audio stream tracks:', tracks.map(t => ({
+                    kind: t.kind,
+                    enabled: t.enabled,
+                    muted: t.muted,
+                    readyState: t.readyState,
+                    label: t.label
+                })));
+
+                // Ensure all tracks are enabled
+                tracks.forEach(track => {
+                    if (!track.enabled) {
+                        console.log('[Room] Enabling track:', track.id);
+                        track.enabled = true;
+                    }
+                });
+
                 try {
-                    await audio.play();
-                    console.log('[Room] Successfully played pending audio after user interaction');
+                    // Ensure audio is unmuted and volume is set
+                    audio.muted = false;
+                    audio.volume = 1.0;
+
+                    if (audio.paused) {
+                        await audio.play();
+                        console.log('[Room] Successfully played audio after user interaction. New state:', {
+                            paused: audio.paused,
+                            currentTime: audio.currentTime,
+                            duration: audio.duration
+                        });
+                    } else {
+                        console.log('[Room] Audio already playing, checking playback:', {
+                            currentTime: audio.currentTime,
+                            duration: audio.duration,
+                            paused: audio.paused
+                        });
+                    }
                 } catch (error) {
-                    console.warn('[Room] Still unable to play audio:', error);
+                    console.error('[Room] Still unable to play audio:', error);
                 }
             }
         }
