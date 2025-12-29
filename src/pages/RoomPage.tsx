@@ -279,6 +279,18 @@ export default function RoomPage () {
                             // Map consumerId to id for MediaSoup compatibility
                             consumerData.id = consumerData.consumerId;
 
+                            // Ensure rtpParameters has codecs for audio (workaround for backend not sending them)
+                            if (consumerData.kind === 'audio' && (!consumerData.rtpParameters.codecs || consumerData.rtpParameters.codecs.length === 0)) {
+                                consumerData.rtpParameters.codecs = [ {
+                                    mimeType: 'audio/opus',
+                                    clockRate: 48000,
+                                    channels: 2,
+                                    parameters: {},
+                                    rtcpFeedback: []
+                                } ];
+                                consumerData.rtpParameters.encodings = consumerData.rtpParameters.encodings || [ { ssrc: 123456 } ];
+                            }
+
                             // Consume the stream
                             const consumer = await rt.consume(consumerData);
                             console.log('[Room] Consumer created:', consumer);
