@@ -48,7 +48,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode; }> = ({ childre
       // optional: fetch current user from API
       api.get('/auth/me').then(async res => {
         if (!timedOut) {
-          const userData = res.data || null;
+          const userData = res.data?.user || null;
           setUser(userData);
           // Fetch balance after setting user
           if (userData) {

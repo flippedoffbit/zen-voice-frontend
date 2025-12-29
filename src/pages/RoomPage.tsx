@@ -37,6 +37,7 @@ export default function RoomPage () {
     // Keep isAdmin state in sync with latest room + user data. Use string compare to be robust.
     useEffect(() => {
         console.log('[Room] Admin check triggered', { user, room });
+        console.log('[Room] Full user object:', user);
         const admin = room?.isAdmin || Boolean(user && room && String(user.id) === String(room.primaryAdminId));
         setIsAdmin(admin);
         console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, calculatedAdmin: Boolean(user && room && String(user.id) === String(room.primaryAdminId)), finalIsAdmin: admin });
