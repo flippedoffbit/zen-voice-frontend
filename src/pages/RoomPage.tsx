@@ -25,7 +25,7 @@ export default function RoomPage () {
     const [ isSpeaking, setIsSpeaking ] = useState(false);
     const [ requestPending, setRequestPending ] = useState(false);
     const [ isAdmin, setIsAdmin ] = useState(false);
-    const [ pendingRequests, setPendingRequests ] = useState<Array<{ id: string; userId: string; displayName?: string }>>([]);
+    const [ pendingRequests, setPendingRequests ] = useState<Array<{ id: string; userId: string; displayName?: string; }>>([]);
     const [ adminPanelOpen, setAdminPanelOpen ] = useState(false);
     const [ sendTransport, setSendTransport ] = useState<any>(null);
     const [ recvTransport, setRecvTransport ] = useState<any>(null);
@@ -193,7 +193,7 @@ export default function RoomPage () {
             if (user && user.id === room?.primaryAdminId) {
                 const onSpeakRequest = (payload: any) => {
                     // Payload expected: { requestId, userId, displayName }
-                    const req = { id: payload.requestId || payload.id || `${payload.userId}-${Date.now()}`, userId: payload.userId, displayName: payload.displayName };
+                    const req = { id: payload.requestId || payload.id || `${ payload.userId }-${ Date.now() }`, userId: payload.userId, displayName: payload.displayName };
                     setPendingRequests(prev => [ req, ...prev ]);
                 };
                 socketClient.on('speak-request', onSpeakRequest as any);
