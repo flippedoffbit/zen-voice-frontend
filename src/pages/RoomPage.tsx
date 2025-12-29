@@ -36,6 +36,7 @@ export default function RoomPage () {
 
     // Keep isAdmin state in sync with latest room + user data. Use string compare to be robust.
     useEffect(() => {
+        console.log('[Room] Admin check triggered', { user, room });
         const admin = room?.isAdmin || Boolean(user && room && String(user.id) === String(room.primaryAdminId));
         setIsAdmin(admin);
         if (process.env.NODE_ENV === 'development') console.log('[Room] admin check', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, calculatedAdmin: Boolean(user && room && String(user.id) === String(room.primaryAdminId)), finalIsAdmin: admin });
@@ -47,9 +48,11 @@ export default function RoomPage () {
             setRoomError(null);
             try {
                 const data = await getRoom(roomId);
+                console.log('[Room] API response for getRoom:', data);
                 if (data.success) {
                     setRoom(data.room);
                     setListenerCount(data.room.listenerCount);
+                    console.log('[Room] Room set:', data.room);
                     // We will set isAdmin from a dedicated effect to handle timing/type issues
                     if (process.env.NODE_ENV === 'development') console.log('[Room] fetched room', { roomId: data.room.id, primaryAdminId: data.room.primaryAdminId, name: data.room.name });
                 } else {
