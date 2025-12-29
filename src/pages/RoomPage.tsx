@@ -30,6 +30,9 @@ export default function RoomPage () {
     const [ sendTransport, setSendTransport ] = useState<any>(null);
     const [ recvTransport, setRecvTransport ] = useState<any>(null);
     const [ localStream, setLocalStream ] = useState<MediaStream | null>(null);
+    const [ joined, setJoined ] = useState(false);
+    const connectedByThisPage = useRef(false);
+    const location = useLocation();
     const { user, loading } = useAuth();
 
     useEffect(() => {
@@ -166,40 +169,47 @@ export default function RoomPage () {
             toast.error('Failed to start speaking');
         }
     };
-    const token = (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function')
-        ? localStorage.getItem('authToken')
-        : null;
+    useEffect(() => {
+        // Listen for insufficient funds error
+        const offInsufficientFunds = subscribe('socket:insufficient_funds', () => {
+            toast.error('Low balance! Please recharge to continue.');
+            navigate(ROUTES.VOICE);
+        });
 
-    if (!user) {
-        // Allow unauthenticated users to view room details but not join
-        console.log('[Room] Viewing room as unauthenticated user:', roomId);
-        setJoined(false);
-        return;
-    }
+        const token = (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function')
+            ? localStorage.getItem('authToken')
+            : null;
 
-    // user exists => connect and join
-    try {
-        // Pre-join balance check (skip for room admins)
-        if (user && user.balance !== undefined && user.balance < 1 && user.id !== room?.primaryAdminId) {
-            toast.error('Insufficient balance! Please recharge to join the room.');
-            navigate(ROUTES.RECHARGE);
+        if (!user) {
+            // Allow unauthenticated users to view room details but not join
+            console.log('[Room] Viewing room as unauthenticated user:', roomId);
+            setJoined(false);
             return;
         }
 
-        console.log('[Room] Connecting socket and joining room as listener:', roomId);
-        socketClient.connect(token || undefined);
-        socketClient.emit('join-room', { roomId });
-        console.log('[Room] Joined room:', roomId);
-        connectedByThisPage.current = true;
-        setJoined(true);
+        // user exists => connect and join
+        try {
+            // Pre-join balance check (skip for room admins)
+            if (user && user.balance !== undefined && user.balance < 1 && user.id !== room?.primaryAdminId) {
+                toast.error('Insufficient balance! Please recharge to join the room.');
+                navigate(ROUTES.RECHARGE);
+                return;
+            }
 
-        // Listen for real-time listener count updates
-        socketClient.on('user-joined', () => {
-            setListenerCount(prev => prev + 1);
-        });
-        socketClient.on('user-left', () => {
-            setListenerCount(prev => prev - 1);
-        });
+            console.log('[Room] Connecting socket and joining room as listener:', roomId);
+            socketClient.connect(token || undefined);
+            socketClient.emit('join-room', { roomId });
+            console.log('[Room] Joined room:', roomId);
+            connectedByThisPage.current = true;
+            setJoined(true);
+
+            // Listen for real-time listener count updates
+            socketClient.on('user-joined', () => {
+                setListenerCount(prev => prev + 1);
+            });
+            socketClient.on('user-left', () => {
+                setListenerCount(prev => prev - 1);
+            });
 
         // Admin: listen for speak requests so admin can approve/reject
         if (user && user.id === room?.primaryAdminId) {
