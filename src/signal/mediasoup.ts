@@ -190,6 +190,16 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         rtpParameters: rtpParams
     });
     console.log('[MediaSoup] Consumer created:', consumer);
+    console.log('[MediaSoup] Consumer paused state:', consumer.paused);
+
+    // CRITICAL: Resume the consumer to start receiving media
+    // Consumers are created in paused state by default
+    if (consumer.paused) {
+        console.log('[MediaSoup] Resuming consumer...');
+        await consumer.resume();
+        console.log('[MediaSoup] Consumer resumed successfully');
+    }
+
     console.log('[MediaSoup] Consumer track:', consumer.track);
     console.log('[MediaSoup] Consumer track details:', {
         id: consumer.track.id,
