@@ -113,21 +113,21 @@ export async function startProducing (sendTransport: any) {
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        
+
         source.connect(analyser);
-        
+
         console.log('[MediaSoup] Producer audio monitoring established');
 
         // Monitor audio levels from microphone
         let checkCount = 0;
         const monitorProducerAudioLevel = () => {
             if (checkCount >= 20) return; // Stop after 20 checks
-            
+
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
             const max = Math.max(...Array.from(dataArray));
-            
-            console.log(`[MediaSoup] PRODUCER audio level check ${checkCount + 1}/20:`, {
+
+            console.log(`[MediaSoup] PRODUCER audio level check ${ checkCount + 1 }/20:`, {
                 average: average.toFixed(2),
                 max: max,
                 hasSignal: max > 0,
@@ -136,11 +136,11 @@ export async function startProducing (sendTransport: any) {
                 trackMuted: track.muted,
                 trackReadyState: track.readyState
             });
-            
+
             checkCount++;
             setTimeout(monitorProducerAudioLevel, 500);
         };
-        
+
         // Start monitoring immediately
         setTimeout(monitorProducerAudioLevel, 100);
     } catch (error) {
@@ -218,21 +218,21 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
 
         // Create source from MediaStream
         const source = audioContext.createMediaStreamSource(remoteStream);
-        
+
         // Create analyser to monitor audio levels
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        
+
         // Create gain node for volume control
         const gainNode = audioContext.createGain();
         gainNode.gain.value = 1.0;
-        
+
         // Connect source -> analyser -> gain -> destination (speakers)
         source.connect(analyser);
         analyser.connect(gainNode);
         gainNode.connect(audioContext.destination);
-        
+
         console.log('[MediaSoup] Web Audio API routing established:', {
             sourceConnected: true,
             gainValue: gainNode.gain.value,
@@ -253,12 +253,12 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         let checkCount = 0;
         const monitorAudioLevel = () => {
             if (checkCount >= 20) return; // Stop after 20 checks
-            
+
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
             const max = Math.max(...Array.from(dataArray));
-            
-            console.log(`[MediaSoup] Audio level check ${checkCount + 1}/20:`, {
+
+            console.log(`[MediaSoup] Audio level check ${ checkCount + 1 }/20:`, {
                 average: average.toFixed(2),
                 max: max,
                 hasSignal: max > 0,
@@ -267,11 +267,11 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
                 trackMuted: consumer.track.muted,
                 trackReadyState: consumer.track.readyState
             });
-            
+
             checkCount++;
             setTimeout(monitorAudioLevel, 500);
         };
-        
+
         // Start monitoring after a brief delay
         setTimeout(monitorAudioLevel, 500);
 
