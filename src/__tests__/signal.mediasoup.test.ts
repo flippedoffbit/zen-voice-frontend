@@ -17,6 +17,7 @@ vi.mock('../mediasoup/client', () => ({
             produce: vi.fn(async () => 'producer-1')
         })),
         createRecvTransport: vi.fn(() => ({ on: vi.fn() })),
+        getDevice: vi.fn(() => ({ rtpCapabilities: { codecs: [] } })),
     }
 }));
 

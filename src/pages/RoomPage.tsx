@@ -257,7 +257,11 @@ export default function RoomPage () {
                     socketClient.on('new-producer', async (data: any) => {
                         console.log('[Room] Received new-producer event:', data);
                         try {
-                            const result = await consumeProducer(rt, data.producerId, roomId, (device as any).rtpCapabilities);
+                            if (!device?.rtpCapabilities) {
+                                console.error('[Room] Device not properly initialized, cannot consume producer');
+                                return;
+                            }
+                            const result = await consumeProducer(rt, data.producerId, roomId, device.rtpCapabilities);
                             if (result) {
                                 remoteAudiosRef.current.push(result.audio); // Prevent GC
                                 console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);

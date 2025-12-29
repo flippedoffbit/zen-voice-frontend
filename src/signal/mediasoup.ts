@@ -80,7 +80,7 @@ export async function initMediasoupForRoom (roomId: string) {
     });
 
     console.log('[MediaSoup] MediaSoup initialization complete');
-    return { sendTransport, recvTransport, device: mediasoupClient };
+    return { sendTransport, recvTransport, device: mediasoupClient.getDevice() };
 }
 
 export async function startProducing (sendTransport: any) {
@@ -101,6 +101,7 @@ export async function startProducing (sendTransport: any) {
 
 export async function consumeProducer (recvTransport: any, producerId: string, roomId: string, rtpCapabilities: any) {
     console.log('[MediaSoup] Consuming producer:', producerId);
+    console.log('[MediaSoup] RTP Capabilities:', JSON.stringify(rtpCapabilities, null, 2));
     // Request consumer creation from server
     const consumeRequest: ConsumeRequest = {
         producerId,
