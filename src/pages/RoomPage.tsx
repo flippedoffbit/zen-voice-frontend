@@ -273,7 +273,7 @@ export default function RoomPage () {
                         if (error.message && error.message.includes('roomId and producerId required')) {
                             toast.error('Failed to consume audio stream: Missing required parameters');
                         } else {
-                            toast.error(`Consume error: ${error.message || 'Unknown error'}`);
+                            toast.error(`Consume error: ${ error.message || 'Unknown error' }`);
                         }
                     });
 
