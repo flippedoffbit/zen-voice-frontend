@@ -25,6 +25,8 @@ export default function RoomPage () {
     const [ isSpeaking, setIsSpeaking ] = useState(false);
     const [ requestPending, setRequestPending ] = useState(false);
     const [ isAdmin, setIsAdmin ] = useState(false);
+    const [ pendingRequests, setPendingRequests ] = useState<Array<{ id: string; userId: string; displayName?: string }>>([]);
+    const [ adminPanelOpen, setAdminPanelOpen ] = useState(false);
     const [ sendTransport, setSendTransport ] = useState<any>(null);
     const [ recvTransport, setRecvTransport ] = useState<any>(null);
     const [ localStream, setLocalStream ] = useState<MediaStream | null>(null);
@@ -187,6 +189,22 @@ export default function RoomPage () {
                 setListenerCount(prev => prev - 1);
             });
 
+            // Admin: listen for speak requests so admin can approve/reject
+            if (user && user.id === room?.primaryAdminId) {
+                const onSpeakRequest = (payload: any) => {
+                    // Payload expected: { requestId, userId, displayName }
+                    const req = { id: payload.requestId || payload.id || `${payload.userId}-${Date.now()}`, userId: payload.userId, displayName: payload.displayName };
+                    setPendingRequests(prev => [ req, ...prev ]);
+                };
+                socketClient.on('speak-request', onSpeakRequest as any);
+
+                // Remove pending if cancelled
+                const onRequestCancelled = (payload: any) => {
+                    setPendingRequests(prev => prev.filter(p => p.userId !== payload.userId && p.id !== payload.requestId));
+                };
+                socketClient.on('speak-request-cancelled', onRequestCancelled as any);
+            }
+
             // Initialize MediaSoup for receiving audio
             (async () => {
                 try {
@@ -261,6 +279,9 @@ export default function RoomPage () {
             socketClient.off('user-joined');
             socketClient.off('user-left');
             socketClient.off('new-producer');
+            // admin listeners
+            socketClient.off('speak-request');
+            socketClient.off('speak-request-cancelled');
             if (typeof offInsufficientFunds === 'function') offInsufficientFunds();
             // Close MediaSoup transports
             if (sendTransport) {
@@ -423,11 +444,73 @@ export default function RoomPage () {
                                     </Button>
                                 ) }
                             </div>
+                        ) : isAdmin ? (
+                            <div className="flex flex-col gap-2">
+                                <div className="flex gap-2">
+                                    <Button variant="gradient" onClick={ async () => {
+                                        // Admin start speaking immediately
+                                        try {
+                                            const { sendTransport } = await initMediasoupForRoom(roomId);
+                                            setSendTransport(sendTransport);
+                                            const { stream } = await startProducing(sendTransport);
+                                            setLocalStream(stream);
+                                            setIsSpeaking(true);
+                                            toast.success('You are now speaking');
+                                        } catch (e) {
+                                            console.error('Admin start speaking failed', e);
+                                            toast.error('Failed to start speaking');
+                                        }
+                                    } } className="flex-1 py-4 rounded-2xl gap-2">
+                                        <Mic size={ 20 } />
+                                        Press to Speak
+                                    </Button>
+                                    <Button variant="outline" onClick={ () => setAdminPanelOpen(open => !open) } className="py-4 rounded-2xl gap-2">
+                                        Manage{ pendingRequests.length > 0 ? ` (${ pendingRequests.length })` : '' }
+                                    </Button>
+                                </div>
+
+                                { adminPanelOpen && (
+                                    <div className="bg-white border border-border rounded-2xl p-4">
+                                        <p className="font-bold mb-3">Pending Speak Requests</p>
+                                        { pendingRequests.length === 0 ? (
+                                            <p className="text-sm text-text-secondary">No pending requests</p>
+                                        ) : (
+                                            <div className="flex flex-col gap-2">
+                                                { pendingRequests.map((r) => (
+                                                    <div key={ r.id } className="flex items-center justify-between gap-2">
+                                                        <div>
+                                                            <div className="font-medium">{ r.displayName || r.userId }</div>
+                                                            <div className="text-xs text-text-secondary">{ r.userId }</div>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <Button variant="primary" size="sm" onClick={ () => {
+                                                                // Approve
+                                                                socketClient.emit('approve-speak', { roomId, requestId: r.id, userId: r.userId });
+                                                                setPendingRequests(prev => prev.filter(p => p.id !== r.id));
+                                                            } }>
+                                                                Approve
+                                                            </Button>
+                                                            <Button variant="outline" size="sm" onClick={ () => {
+                                                                socketClient.emit('reject-speak', { roomId, requestId: r.id, userId: r.userId });
+                                                                setPendingRequests(prev => prev.filter(p => p.id !== r.id));
+                                                            } }>
+                                                                Reject
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )) }
+                                            </div>
+                                        ) }
+                                    </div>
+                                ) }
+                            </div>
                         ) : (
-                            <Button variant="gradient" onClick={ handleRequestToSpeak } className="w-full py-4 rounded-2xl gap-2">
-                                <Mic size={ 20 } />
-                                Request to Speak
-                            </Button>
+                            <div>
+                                <Button variant="gradient" onClick={ handleRequestToSpeak } className="w-full py-4 rounded-2xl gap-2">
+                                    <Mic size={ 20 } />
+                                    Request to Speak
+                                </Button>
+                            </div>
                         ) }
 
                         <Button variant="ghost" onClick={ handleLeave } className="w-full py-4 rounded-2xl gap-2 text-text-secondary">
