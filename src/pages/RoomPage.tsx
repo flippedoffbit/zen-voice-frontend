@@ -237,10 +237,8 @@ export default function RoomPage () {
                 socketClient.on('speak-request-cancelled', onRequestCancelled as any);
             }
 
-            // Log pendingRequests changes (dev only)
-            useEffect(() => {
-                if (process.env.NODE_ENV === 'development') console.log('[Room] pendingRequests changed', { count: pendingRequests.length, pendingRequests });
-            }, [ pendingRequests ]);
+            // Log pendingRequests changes (dev only) — moved to top-level
+
 
             // Initialize MediaSoup for receiving audio
             (async () => {
@@ -314,6 +312,22 @@ export default function RoomPage () {
                     toString: e?.toString?.(),
                     extra: Object.getOwnPropertyNames(e || {}).reduce((acc: any, k: string) => (acc[ k ] = (e as any)[ k ], acc), {})
                 });
+                // If React minified error, attempt to fetch decoded message (best-effort; may be blocked by CORS)
+                const m = String(e?.message || '');
+                const match = m.match(/Minified React error #(\d+)/);
+                if (match) {
+                    const code = match[ 1 ];
+                    (async () => {
+                        try {
+                            const url = `https://reactjs.org/docs/error-decoder.html?invariant=${ code }`;
+                            const resp = await fetch(url);
+                            const text = await resp.text();
+                            console.error('[Room] React error decoder HTML (first 500 chars):', text.slice(0, 500));
+                        } catch (fetchErr) {
+                            console.warn('[Room] Failed to fetch React error decoder', fetchErr);
+                        }
+                    })();
+                }
             } catch (err) {
                 console.error('[Room] Failed to serialize join error', err);
             }
@@ -345,12 +359,16 @@ export default function RoomPage () {
             setJoined(false);
         };
     }, [ roomId, user ]);
+
+    useEffect(() => {
+        if (process.env.NODE_ENV === 'development') console.log('[Room] pendingRequests changed', { count: pendingRequests.length, pendingRequests });
+    }, [ pendingRequests ]);
     // Render debug: show which bottom control mode will be rendered (dev only)
     if (process.env.NODE_ENV === 'development') {
         const controlMode = isSpeaking ? 'speaking' : requestPending ? 'requestPending' : isAdmin ? 'admin' : !joined ? 'read-only' : 'joiner';
         console.log('[Room] render bottom controls', { controlMode, isAdmin, joined, userId: user?.id, roomAdminId: room?.primaryAdminId });
     }
-    return roomLoading ? (
+    const renderContent = () => roomLoading ? (
         <div className="min-h-screen bg-background flex flex-col">
             <div className="flex h-screen items-center justify-center">
                 <div className="text-center">
@@ -563,4 +581,5 @@ export default function RoomPage () {
             </div>
         </div>
     );
+    return (renderContent());
 }
