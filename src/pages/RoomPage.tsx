@@ -301,10 +301,22 @@ export default function RoomPage () {
                 // clear the state so we don't re-run on subsequent renders
                 navigate(location.pathname, { replace: true, state: {} });
                 // async call to request to speak
-                setTimeout(() => { handleRequestToSpeak().catch(() => {}); }, 50);
+                setTimeout(() => { handleRequestToSpeak().catch((err) => { console.error('[Room] requestToSpeak resumed failed', err); }); }, 50);
             }
-        } catch (e) {
+        } catch (e: any) {
             logger.warn('Failed to connect/join room', e);
+            // Provide expanded debug info to help capture minified/runtime errors
+            try {
+                console.error('[Room] Detailed join error:', {
+                    message: e?.message,
+                    name: e?.name,
+                    stack: e?.stack,
+                    toString: e?.toString?.(),
+                    extra: Object.getOwnPropertyNames(e || {}).reduce((acc: any, k: string) => (acc[ k ] = (e as any)[ k ], acc), {})
+                });
+            } catch (err) {
+                console.error('[Room] Failed to serialize join error', err);
+            }
         }
 
         return () => {
