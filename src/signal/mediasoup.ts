@@ -254,20 +254,22 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         });
 
         // Resume audio context if suspended (Safari requirement)
+        // Note: This may not succeed without user interaction, but we try anyway
         if (audioContext.state === 'suspended') {
             console.log('[MediaSoup] AudioContext suspended, attempting to resume...');
-            try {
-                await audioContext.resume();
-                console.log('[MediaSoup] AudioContext resumed successfully. New state:', audioContext.state);
+            console.log('[MediaSoup] Note: If this hangs, user interaction is required. Click anywhere on the page.');
 
-                // Verify resume was successful
-                if (audioContext.state === 'suspended') {
-                    console.error('[MediaSoup] AudioContext still suspended! State:', audioContext.state);
-                    console.log('[MediaSoup] This may require user interaction. Click anywhere on the page.');
-                }
-            } catch (resumeError) {
-                console.error('[MediaSoup] Failed to resume AudioContext:', resumeError);
-            }
+            // Don't await - resume asynchronously without blocking
+            // The user interaction handler will retry if this fails
+            const ctx = audioContext; // Capture for closure
+            ctx.resume()
+                .then(() => {
+                    console.log('[MediaSoup] AudioContext resumed successfully. New state:', ctx.state);
+                })
+                .catch((resumeError) => {
+                    console.error('[MediaSoup] Failed to resume AudioContext:', resumeError);
+                    console.log('[MediaSoup] User interaction required. Click anywhere on the page to enable audio.');
+                });
         } else {
             console.log('[MediaSoup] AudioContext already running:', audioContext.state);
         }
