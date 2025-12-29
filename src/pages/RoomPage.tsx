@@ -268,13 +268,13 @@ export default function RoomPage () {
                             // Wait for consumer data
                             const consumerData = await new Promise<any>((resolve) => {
                                 const handler = (payload: any) => {
-                                    socketClient.off('consumer-created', handler);
+                                    socketClient.off('consumed', handler);
                                     resolve(payload);
                                 };
-                                socketClient.once('consumer-created', handler);
+                                socketClient.once('consumed', handler);
                             });
 
-                            console.log('[Room] Received consumer-created:', consumerData);
+                            console.log('[Room] Received consumed:', consumerData);
 
                             // Consume the stream
                             const consumer = await rt.consume(consumerData);
