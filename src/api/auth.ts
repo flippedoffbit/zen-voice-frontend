@@ -1,6 +1,6 @@
 import api, { setAuthToken } from './client';
 
-type Identifier = string | { phone?: string; email?: string };
+type Identifier = string | { phone?: string; email?: string; };
 
 export async function requestOtp (id: Identifier) {
     const body = typeof id === 'string' ? { phone: id } : id;

@@ -9,7 +9,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 const Input = forwardRef<HTMLInputElement, InputProps>(
     ({ className, label, error, id, ...props }: any, ref) => {
         // Generate an id so <label htmlFor> works for testing and accessibility.
-        const inputId = id ?? (label ? `input-${String(label).toLowerCase().replace(/\s+/g, '-')}` : undefined);
+        const inputId = id ?? (label ? `input-${ String(label).toLowerCase().replace(/\s+/g, '-') }` : undefined);
         return (
             <div className="w-full">
                 { label && (
