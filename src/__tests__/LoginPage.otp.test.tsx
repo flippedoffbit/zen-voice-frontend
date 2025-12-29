@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LoginPage from '../pages/LoginPage';
+import type React from 'react';
 
 // Mocks
 vi.mock('../api/auth', () => ({
@@ -85,6 +86,48 @@ describe('LoginPage - email & OTP flows (tests expect future UI support)', () =>
         await waitFor(() => {
             expect(requestOtp).toHaveBeenCalledWith({ phone: '5551234' });
         });
+    });
+
+    it('custom amount calculates coins correctly and calls creditWallet', async () => {
+        // Override auth to simulate a logged-in user using a per-test mock
+        await vi.doMock('../auth/AuthContext', async () => {
+            const actual = await vi.importActual('../auth/AuthContext');
+            return {
+                ...actual,
+                useAuth: () => ({ user: { id: 'test-user' }, loading: false, login: vi.fn(), logout: vi.fn() })
+            };
+        });
+
+        // Ensure API call happens; mock creditWallet via direct import
+        const walletApi = await vi.importActual('../api/wallet');
+        const mockCredit = vi.spyOn(walletApi as any, 'creditWallet').mockResolvedValue({ wallet: { balance: 1000 } });
+
+        // Re-import component after mocking auth so it picks up mocked hook
+        const mod = await vi.importActual('../pages/RechargePage') as { default: React.ComponentType<any>; };
+        const RechargePage = mod.default as React.ComponentType<any>;
+
+        render(
+            <MemoryRouter>
+                <RechargePage />
+            </MemoryRouter>
+        );
+
+        // Enter custom amount and enable custom
+        const amountInput = screen.getByPlaceholderText(/enter amount in/i);
+        fireEvent.change(amountInput, { target: { value: '25' } });
+        const useButton = screen.getByRole('button', { name: /use/i });
+        fireEvent.click(useButton);
+
+        // Click proceed
+        const proceed = screen.getByRole('button', { name: /proceed to pay/i });
+        fireEvent.click(proceed);
+
+        await waitFor(() => {
+            // 25 * 10 coins/₹ = 250 coins expected
+            expect(mockCredit).toHaveBeenCalledWith(250, expect.stringContaining('Custom'));
+        });
+
+        mockCredit.mockRestore();
     });
 
     it('shows friendly message when server returns RATE_LIMITED on request', async () => {

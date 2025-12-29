@@ -17,10 +17,16 @@ const PACKAGES = [
     { id: '6', coins: 10000, price: 650, bonus: 2500 },
 ];
 
+// Derived rate: coins per INR (use smallest package as base)
+const COINS_PER_INR = PACKAGES[ 0 ].coins / PACKAGES[ 0 ].price; // 100/10 = 10 coins per ₹1
+
+
 export default function RechargePage () {
     const [ selectedId, setSelectedId ] = useState<string | null>(null);
     const [ isLoading, setIsLoading ] = useState(false);
     const [ balance, setBalance ] = useState<number | null>(null);
+    const [ customAmount, setCustomAmount ] = useState<string>('');
+    const [ useCustom, setUseCustom ] = useState(false);
     const navigate = useNavigate();
     const { user, loading } = useAuth();
     const location = useLocation();
@@ -37,13 +43,21 @@ export default function RechargePage () {
     }, [ user ]);
 
     const handleRecharge = async () => {
-        if (!selectedId) {
-            toast.error('Please select a package');
+        if (!useCustom && !selectedId) {
+            toast.error('Please select a package or use a custom amount');
             return;
         }
 
-        const pkg = PACKAGES.find(p => p.id === selectedId);
-        if (!pkg) return;
+        if (useCustom) {
+            const amt = Number(customAmount);
+            if (!amt || amt <= 0) {
+                toast.error('Please enter a valid custom amount');
+                return;
+            }
+
+        }
+
+        const pkg = selectedId ? PACKAGES.find(p => p.id === selectedId) : null;
 
         if (loading) {
             toast.loading('Checking authentication...');
@@ -60,8 +74,17 @@ export default function RechargePage () {
 
         setIsLoading(true);
         try {
-            const totalCoins = pkg.coins + (pkg.bonus || 0);
-            const data = await creditWallet(totalCoins, `Recharge: ${ pkg.coins } Coins package`);
+            let totalCoins = 0;
+            let description = '';
+            if (useCustom) {
+                const amt = Number(customAmount);
+                totalCoins = Math.round(amt * COINS_PER_INR);
+                description = `Recharge: Custom ₹${ amt } -> ${ totalCoins } Coins`;
+            } else if (pkg) {
+                totalCoins = pkg.coins + (pkg.bonus || 0);
+                description = `Recharge: ${ pkg.coins } Coins package`;
+            }
+            const data = await creditWallet(totalCoins, description);
             setBalance(data.wallet.balance);
             toast.success('Recharge successful! 🪙');
         } catch (err: any) {
@@ -105,18 +128,28 @@ export default function RechargePage () {
                         <div className="flex justify-between items-center mb-2">
                             <span className="text-text-secondary">Selected Package</span>
                             <span className="font-bold">
-                                { selectedId ? `${ PACKAGES.find((p) => p.id === selectedId)?.coins } Coins` : 'None' }
+                                { !useCustom ? (selectedId ? `${ PACKAGES.find((p) => p.id === selectedId)?.coins } Coins` : 'None') : 'Custom' }
                             </span>
                         </div>
+
+                        <div className="mb-4">
+                            <label className="block text-sm text-text-secondary mb-2">Custom Amount (₹)</label>
+                            <div className="flex gap-2">
+                                <input value={ customAmount } onChange={ (e) => setCustomAmount(e.target.value) } placeholder="Enter amount in ₹" className="flex-1 px-4 py-3 rounded-xl border border-border" type="number" min={ 1 } />
+                                <button type="button" className={ `px-4 py-3 rounded-xl ${ useCustom ? 'bg-primary text-white' : 'bg-gray-100' }` } onClick={ () => setUseCustom(u => !u) }>{ useCustom ? 'Using Custom' : 'Use' }</button>
+                            </div>
+                            <p className="text-xs text-text-muted mt-2">Enter a custom INR amount to buy coins at our base rate (~{ COINS_PER_INR } coins per ₹1).</p>
+                        </div>
+
                         <div className="flex justify-between items-center">
                             <span className="text-text-secondary">Total Amount</span>
                             <span className="text-2xl font-bold text-primary">
-                                ₹{ selectedId ? PACKAGES.find((p) => p.id === selectedId)?.price : '0' }
+                                ₹{ useCustom ? (customAmount || '0') : (selectedId ? PACKAGES.find((p) => p.id === selectedId)?.price : '0') }
                             </span>
                         </div>
                     </div>
 
-                    <Button variant="gradient" className="w-full py-4 text-lg" onClick={ handleRecharge } isLoading={ isLoading } disabled={ !selectedId }>
+                    <Button variant="gradient" className="w-full py-4 text-lg" onClick={ handleRecharge } isLoading={ isLoading } disabled={ !(selectedId || useCustom) }>
                         Proceed to Pay
                     </Button>
 
