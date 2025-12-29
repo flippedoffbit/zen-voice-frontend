@@ -97,3 +97,38 @@ export async function startProducing (sendTransport: any) {
     console.log('[MediaSoup] Audio producer created:', producer);
     return { producer, stream };
 }
+
+export async function consumeProducer (recvTransport: any, producerId: string, roomId: string) {
+    console.log('[MediaSoup] Consuming producer:', producerId);
+    // Request consumer creation from server
+    socketClient.emit('consume', {
+        transportId: recvTransport.id,
+        producerId,
+        roomId
+    });
+    console.log('[MediaSoup] Emitted consume for producer:', producerId, 'on transport:', recvTransport.id);
+
+    // Wait for consumer data
+    const consumerData = await socketOnce<{ id: string; producerId: string; kind: string; rtpParameters: any; }>('consumed');
+    console.log('[MediaSoup] Received consumed:', consumerData);
+
+    // Check if rtpParameters are provided
+    if (!consumerData.rtpParameters) {
+        console.warn('[MediaSoup] Missing rtpParameters in consumed response; cannot consume');
+        throw new Error('Missing rtpParameters');
+    }
+
+    // Consume the stream
+    const consumer = await recvTransport.consume(consumerData);
+    console.log('[MediaSoup] Consumer created:', consumer);
+
+    // Create audio element and play
+    const stream = new MediaStream([ consumer.track ]);
+    const audio = new Audio();
+    audio.srcObject = stream;
+    audio.volume = 1;
+    await audio.play();
+    console.log('[MediaSoup] Playing audio from producer');
+
+    return { consumer, audio };
+}

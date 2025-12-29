@@ -20,7 +20,7 @@ vi.mock('../mediasoup/client', () => ({
     }
 }));
 
-import { initMediasoupForRoom } from '../signal/mediasoup';
+import { initMediasoupForRoom, consumeProducer } from '../signal/mediasoup';
 import { socketClient } from '../socket/client';
 import { mediasoupClient } from '../mediasoup/client';
 
@@ -57,5 +57,75 @@ describe('signal/mediasoup normalization', () => {
         expect(mediasoupClient.createRecvTransport).toHaveBeenCalled();
         expect(r.sendTransport).toBeTruthy();
         expect(r.recvTransport).toBeTruthy();
+    });
+
+    it('consumes a producer with server-provided rtpParameters', async () => {
+        // Arrange
+        const mockTransport = {
+            id: 'recv-transport-1',
+            consume: vi.fn().mockResolvedValue({ track: { kind: 'audio' } })
+        };
+        const mockAudio = {
+            srcObject: null,
+            volume: 1,
+            play: vi.fn().mockResolvedValue(undefined)
+        };
+        global.Audio = vi.fn().mockImplementation(() => mockAudio);
+        global.MediaStream = vi.fn().mockImplementation((tracks) => ({ getTracks: () => tracks }));
+
+        (socketClient.once as any).mockImplementation((event: string, cb: any) => {
+            if (event === 'consumed') {
+                setTimeout(() => cb({
+                    id: 'consumer-1',
+                    producerId: 'producer-1',
+                    kind: 'audio',
+                    rtpParameters: { codecs: [ { mimeType: 'audio/opus' } ], encodings: [ { ssrc: 123 } ] }
+                }), 0);
+            }
+            return Promise.resolve();
+        });
+
+        // Act
+        const result = await consumeProducer(mockTransport, 'producer-1', 'room-1');
+
+        // Assert
+        expect(socketClient.emit).toHaveBeenCalledWith('consume', {
+            transportId: 'recv-transport-1',
+            producerId: 'producer-1',
+            roomId: 'room-1'
+        });
+        expect(mockTransport.consume).toHaveBeenCalledWith({
+            id: 'consumer-1',
+            producerId: 'producer-1',
+            kind: 'audio',
+            rtpParameters: { codecs: [ { mimeType: 'audio/opus' } ], encodings: [ { ssrc: 123 } ] }
+        });
+        expect(mockAudio.srcObject).toEqual({ getTracks: expect.any(Function) });
+
+        const tracks = mockAudio.srcObject?.getTracks();
+        expect(tracks?.[0]).toEqual({ kind: 'audio' });
+        expect(mockAudio.play).toHaveBeenCalled();
+        expect(result.consumer.track).toEqual({ kind: 'audio' });
+        expect(result.audio).toBe(mockAudio);
+    });
+
+    it('throws error when rtpParameters are missing', async () => {
+        // Arrange
+        const mockTransport = { id: 'recv-transport-1', consume: vi.fn() };
+
+        (socketClient.once as any).mockImplementation((event: string, cb: any) => {
+            if (event === 'consumed') {
+                setTimeout(() => cb({
+                    id: 'consumer-1',
+                    producerId: 'producer-1',
+                    kind: 'audio'
+                    // no rtpParameters
+                }), 0);
+            }
+            return Promise.resolve();
+        });
+
+        // Act & Assert
+        await expect(consumeProducer(mockTransport, 'producer-1', 'room-1')).rejects.toThrow('Missing rtpParameters');
     });
 });

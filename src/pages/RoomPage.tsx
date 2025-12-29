@@ -4,7 +4,7 @@ import Container from '../components/ui/Container';
 import Button from '../components/ui/Button';
 import SpeakerCircle from '../components/room/SpeakerCircle';
 import { socketClient } from '../socket/client';
-import { initMediasoupForRoom, startProducing } from '../signal/mediasoup';
+import { initMediasoupForRoom, startProducing, consumeProducer } from '../signal/mediasoup';
 import { ChevronLeft, MoreVertical, Users, Mic, LogOut, Shield } from 'lucide-react';
 import { ROUTES } from '../constants/routes';
 import { useAuth } from '../auth/AuthContext';
@@ -257,52 +257,9 @@ export default function RoomPage () {
                     socketClient.on('new-producer', async (data: any) => {
                         console.log('[Room] Received new-producer event:', data);
                         try {
-                            // Request consumer creation from server
-                            socketClient.emit('consume', {
-                                transportId: rt.id,
-                                producerId: data.producerId,
-                                roomId
-                            });
-                            console.log('[Room] Emitted consume for producer:', data.producerId, 'on transport:', rt.id);
-
-                            // Wait for consumer data
-                            const consumerData = await new Promise<any>((resolve) => {
-                                const handler = (payload: any) => {
-                                    socketClient.off('consumed', handler);
-                                    resolve(payload);
-                                };
-                                socketClient.once('consumed', handler);
-                            });
-
-                            console.log('[Room] Received consumed:', consumerData);
-
-                            // Map consumerId to id for MediaSoup compatibility
-                            consumerData.id = consumerData.consumerId;
-
-                            // Ensure rtpParameters has codecs for audio (workaround for backend not sending them)
-                            if (consumerData.kind === 'audio' && (!consumerData.rtpParameters.codecs || consumerData.rtpParameters.codecs.length === 0)) {
-                                consumerData.rtpParameters.codecs = [ {
-                                    mimeType: 'audio/opus',
-                                    clockRate: 48000,
-                                    channels: 2, payloadType: 111, parameters: {},
-                                    rtcpFeedback: []
-                                } ];
-                                consumerData.rtpParameters.encodings = consumerData.rtpParameters.encodings || [ { ssrc: 123456 } ];
-                            }
-
-                            // Consume the stream
-                            const consumer = await rt.consume(consumerData);
-                            console.log('[Room] Consumer created:', consumer);
-
-                            // Play the audio
-                            const stream = new MediaStream([ consumer.track ]);
-                            const audio = new Audio();
-                            audio.srcObject = stream;
-                            audio.volume = 1; // Ensure volume
+                            const { audio } = await consumeProducer(rt, data.producerId, roomId);
                             remoteAudiosRef.current.push(audio); // Prevent GC
-                            audio.play().catch(e => console.error('Failed to play audio:', e));
                             console.log('[Room] Playing audio from producer, total audios:', remoteAudiosRef.current.length);
-
                         } catch (e) {
                             console.error('[Room] Failed to consume producer:', e);
                         }
