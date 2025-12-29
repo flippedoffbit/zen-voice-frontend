@@ -26,7 +26,6 @@ export default function RoomPage () {
     const [ requestPending, setRequestPending ] = useState(false);
     const [ isAdmin, setIsAdmin ] = useState(false);
     const [ pendingRequests, setPendingRequests ] = useState<Array<{ id: string; userId: string; displayName?: string; }>>([]);
-    const [ adminPanelOpen, setAdminPanelOpen ] = useState(false);
     const [ sendTransport, setSendTransport ] = useState<any>(null);
     const [ recvTransport, setRecvTransport ] = useState<any>(null);
     const [ localStream, setLocalStream ] = useState<MediaStream | null>(null);
@@ -489,50 +488,43 @@ export default function RoomPage () {
                         ) : isAdmin ? (
                             // Admin controls (shown even if not joined)
                             <div className="flex flex-col gap-2">
-                                <div className="flex gap-2">
-                                    <Button variant="gradient" onClick={ handleAdminStartSpeaking } className="flex-1 py-4 rounded-2xl gap-2">
-                                        <Mic size={ 20 } />
-                                        Press to Speak
-                                    </Button>
-                                    <Button variant="outline" onClick={ () => setAdminPanelOpen(open => !open) } className="py-4 rounded-2xl gap-2">
-                                        Manage{ pendingRequests.length > 0 ? ` (${ pendingRequests.length })` : '' }
-                                    </Button>
-                                </div>
+                                <Button variant="gradient" onClick={ handleAdminStartSpeaking } className="w-full py-4 rounded-2xl gap-2">
+                                    <Mic size={ 20 } />
+                                    Press to Speak
+                                </Button>
 
-                                { adminPanelOpen && (
-                                    <div className="bg-white border border-border rounded-2xl p-4">
-                                        <p className="font-bold mb-3">Pending Speak Requests</p>
-                                        { pendingRequests.length === 0 ? (
-                                            <p className="text-sm text-text-secondary">No pending requests</p>
-                                        ) : (
-                                            <div className="flex flex-col gap-2">
-                                                { pendingRequests.map((r) => (
-                                                    <div key={ r.id } className="flex items-center justify-between gap-2">
-                                                        <div>
-                                                            <div className="font-medium">{ r.displayName || r.userId }</div>
-                                                            <div className="text-xs text-text-secondary">{ r.userId }</div>
-                                                        </div>
-                                                        <div className="flex gap-2">
-                                                            <Button variant="primary" size="sm" onClick={ () => {
-                                                                // Approve
-                                                                socketClient.emit('approve-speak', { roomId, requestId: r.id, userId: r.userId });
-                                                                setPendingRequests(prev => prev.filter(p => p.id !== r.id));
-                                                            } }>
-                                                                Approve
-                                                            </Button>
-                                                            <Button variant="outline" size="sm" onClick={ () => {
-                                                                socketClient.emit('reject-speak', { roomId, requestId: r.id, userId: r.userId });
-                                                                setPendingRequests(prev => prev.filter(p => p.id !== r.id));
-                                                            } }>
-                                                                Reject
-                                                            </Button>
-                                                        </div>
+                                <div className="bg-white border border-border rounded-2xl p-4">
+                                    <p className="font-bold mb-3">Pending Speak Requests</p>
+                                    { pendingRequests.length === 0 ? (
+                                        <p className="text-sm text-text-secondary">No pending requests</p>
+                                    ) : (
+                                        <div className="flex flex-col gap-2">
+                                            { pendingRequests.map((r) => (
+                                                <div key={ r.id } className="flex items-center justify-between gap-2">
+                                                    <div>
+                                                        <div className="font-medium">{ r.displayName || r.userId }</div>
+                                                        <div className="text-xs text-text-secondary">{ r.userId }</div>
                                                     </div>
-                                                )) }
-                                            </div>
-                                        ) }
-                                    </div>
-                                ) }
+                                                    <div className="flex gap-2">
+                                                        <Button variant="primary" size="sm" onClick={ () => {
+                                                            // Approve
+                                                            socketClient.emit('approve-speak', { roomId, requestId: r.id, userId: r.userId });
+                                                            setPendingRequests(prev => prev.filter(p => p.id !== r.id));
+                                                        } }>
+                                                            Approve
+                                                        </Button>
+                                                        <Button variant="outline" size="sm" onClick={ () => {
+                                                            socketClient.emit('reject-speak', { roomId, requestId: r.id, userId: r.userId });
+                                                            setPendingRequests(prev => prev.filter(p => p.id !== r.id));
+                                                        } }>
+                                                            Reject
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            )) }
+                                        </div>
+                                    ) }
+                                </div>
                             </div>
                         ) : !joined ? (
                             // User can see the room but cannot join without logging in
