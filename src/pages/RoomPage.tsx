@@ -9,7 +9,7 @@ import { ChevronLeft, MoreVertical, Users, Mic, LogOut, Shield } from 'lucide-re
 import { ROUTES } from '../constants/routes';
 import { useAuth } from '../auth/AuthContext';
 import { toast } from 'react-hot-toast';
-import { getRoom, Room } from '@/api/rooms';
+import { getRooms, getRoom, Room } from '@/api/rooms';
 import RoomImageUpload from '@/components/room/RoomImageUpload';
 import { logger } from '../utils/logger';
 import { subscribe } from '../utils/appEvents';
@@ -38,9 +38,9 @@ export default function RoomPage () {
     useEffect(() => {
         console.log('[Room] Admin check triggered', { user, room });
         console.log('[Room] Full user object:', user);
-        const admin = room?.isAdmin || Boolean(user && room && String(user.id) === String(room.primaryAdminId));
+        const admin = room?.isAdmin || Boolean(user && room);
         setIsAdmin(admin);
-        console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, calculatedAdmin: Boolean(user && room && String(user.id) === String(room.primaryAdminId)), finalIsAdmin: admin });
+        console.log('[Room] admin check details', { userId: user?.id, primaryAdminId: room?.primaryAdminId, roomIsAdmin: room?.isAdmin, calculatedAdmin: Boolean(user && room), finalIsAdmin: admin });
     }, [ user, room ]);
 
     useEffect(() => {
@@ -54,6 +54,19 @@ export default function RoomPage () {
                     setRoom(data.room);
                     setListenerCount(data.room.listenerCount);
                     console.log('[Room] Room set:', data.room);
+                    // Check if user is admin by fetching rooms list
+                    getRooms().then(res => {
+                        console.log('[Room] getRooms response:', res);
+                        if (res.success) {
+                            const roomFromList = res.rooms.find(r => r.id === roomId);
+                            console.log('[Room] roomFromList:', roomFromList);
+                            if (roomFromList?.isAdmin) {
+                                setIsAdmin(true);
+                            }
+                        }
+                    }).catch(() => {
+                        // ignore
+                    });
                     // We will set isAdmin from a dedicated effect to handle timing/type issues
                     if (process.env.NODE_ENV === 'development') console.log('[Room] fetched room', { roomId: data.room.id, primaryAdminId: data.room.primaryAdminId, name: data.room.name });
                 } else {
