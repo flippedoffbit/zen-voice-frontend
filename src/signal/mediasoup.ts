@@ -5,6 +5,108 @@ import { toast } from 'react-hot-toast';
 
 type AnyRtcStats = any;
 
+function getPeerConnectionFromTransport (transport: any): RTCPeerConnection | undefined {
+    try {
+        const handler = transport?._handler;
+        const pc = handler?._pc ?? handler?.pc ?? handler?._pc1 ?? handler?._pc2;
+        if (pc && typeof pc.getStats === 'function') return pc as RTCPeerConnection;
+    } catch (e) {}
+    return undefined;
+}
+
+function dumpPeerConnectionBasics (label: string, transport: any) {
+    const pc = getPeerConnectionFromTransport(transport);
+    if (!pc) {
+        console.warn(`${ label } no RTCPeerConnection found on transport (private API)`);
+        return;
+    }
+
+    let config: any;
+    try {
+        config = pc.getConfiguration ? pc.getConfiguration() : undefined;
+    } catch (e) {
+        config = undefined;
+    }
+
+    console.log(label, {
+        pcConnectionState: (pc as any).connectionState,
+        pcIceConnectionState: (pc as any).iceConnectionState,
+        pcIceGatheringState: (pc as any).iceGatheringState,
+        pcSignalingState: (pc as any).signalingState,
+        pcConfig: config
+            ? {
+                iceServers: summarizeIceServers((config as any).iceServers),
+                iceTransportPolicy: (config as any).iceTransportPolicy
+            }
+            : undefined
+    });
+}
+
+function dumpIceCandidatePairDetails (label: string, stats: AnyRtcStats) {
+    const values = statsValues(stats);
+    const candidatePairs = values.filter((s) => s?.type === 'candidate-pair');
+    const localCandidates = new Map<string, any>();
+    const remoteCandidates = new Map<string, any>();
+
+    for (const s of values) {
+        if (s?.type === 'local-candidate' && s?.id) localCandidates.set(String(s.id), s);
+        if (s?.type === 'remote-candidate' && s?.id) remoteCandidates.set(String(s.id), s);
+    }
+
+    if (!candidatePairs.length) {
+        console.log(label, { candidatePairs: 0, note: 'No candidate-pair stats yet (or browser hides them)' });
+        return;
+    }
+
+    const scored = candidatePairs
+        .map((p) => {
+            const local = p?.localCandidateId ? localCandidates.get(String(p.localCandidateId)) : undefined;
+            const remote = p?.remoteCandidateId ? remoteCandidates.get(String(p.remoteCandidateId)) : undefined;
+            return {
+                id: p?.id,
+                state: p?.state,
+                nominated: p?.nominated,
+                selected: p?.selected,
+                writable: p?.writable,
+                priority: p?.priority,
+                bytesSent: p?.bytesSent,
+                bytesReceived: p?.bytesReceived,
+                currentRoundTripTime: p?.currentRoundTripTime,
+                availableOutgoingBitrate: p?.availableOutgoingBitrate,
+                local: local
+                    ? {
+                        candidateType: local.candidateType,
+                        protocol: local.protocol,
+                        address: local.ip ?? local.address,
+                        port: local.port,
+                        networkType: local.networkType,
+                        relayProtocol: local.relayProtocol
+                    }
+                    : undefined,
+                remote: remote
+                    ? {
+                        candidateType: remote.candidateType,
+                        protocol: remote.protocol,
+                        address: remote.ip ?? remote.address,
+                        port: remote.port,
+                        relayProtocol: remote.relayProtocol
+                    }
+                    : undefined
+            };
+        })
+        .sort((a, b) => {
+            const aScore = (a.selected ? 1000 : 0) + (a.nominated ? 100 : 0) + (a.state === 'succeeded' ? 10 : 0);
+            const bScore = (b.selected ? 1000 : 0) + (b.nominated ? 100 : 0) + (b.state === 'succeeded' ? 10 : 0);
+            return bScore - aScore;
+        });
+
+    // Limit to top entries to avoid huge logs.
+    console.log(label, {
+        candidatePairs: candidatePairs.length,
+        topPairs: scored.slice(0, 8)
+    });
+}
+
 function statsValues (stats: AnyRtcStats): any[] {
     try {
         const out: any[] = [];
@@ -160,6 +262,24 @@ function dumpRtcStatsSummary (label: string, stats: AnyRtcStats) {
             remotePort: remoteCand?.port
         });
     } catch (e) {}
+}
+
+async function dumpTransportIceDiagnostics (label: string, transport: any) {
+    try {
+        dumpPeerConnectionBasics(`${ label } pc`, transport);
+    } catch (e) {
+        console.warn('[MediaSoup] Failed to dump pc basics:', e);
+    }
+
+    try {
+        if (typeof transport?.getStats === 'function') {
+            const stats = await transport.getStats();
+            dumpRtcStatsSummary(`${ label } getStats()`, stats);
+            dumpIceCandidatePairDetails(`${ label } candidate-pairs`, stats);
+        }
+    } catch (e) {
+        console.warn('[MediaSoup] Failed to dump transport stats diagnostics:', e);
+    }
 }
 
 function socketOnce<T = any> (event: string) {
@@ -344,18 +464,24 @@ export async function initMediasoupForRoom (roomId: string) {
     try {
         sendTransport.on('connectionstatechange', async (state: any) => {
             console.log('[MediaSoup] Send transport connection state:', state);
+            if (state === 'connecting') {
+                // If we stay in connecting for too long, dump extra ICE diagnostics.
+                setTimeout(() => {
+                    try {
+                        if ((sendTransport as any).connectionState === 'connecting') {
+                            console.warn('[MediaSoup] Send transport stuck in connecting; dumping ICE diagnostics');
+                            void dumpTransportIceDiagnostics('[MediaSoup] SEND transport (stuck connecting)', sendTransport);
+                        }
+                    } catch (e) {}
+                }, 6000);
+            }
             if (state === 'failed') {
                 try {
                     console.log('[MediaSoup] SEND transport failed — debug snapshot', (sendTransport as any).__debug);
                     console.log('[MediaSoup] SEND transport failed — debug snapshot JSON', safeStringify((sendTransport as any).__debug));
                 } catch (e) {}
                 try {
-                    if (typeof (sendTransport as any).getStats === 'function') {
-                        const tStats = await (sendTransport as any).getStats();
-                        dumpRtcStatsSummary('[MediaSoup] SEND transport getStats()', tStats);
-                    } else {
-                        console.warn('[MediaSoup] sendTransport.getStats() not available');
-                    }
+                    await dumpTransportIceDiagnostics('[MediaSoup] SEND transport failed', sendTransport);
                 } catch (e) {
                     console.warn('[MediaSoup] Failed to dump sendTransport stats:', e);
                 }
@@ -363,6 +489,23 @@ export async function initMediasoupForRoom (roomId: string) {
         });
         sendTransport.on('iceconnectionstatechange', (state: any) => console.log('[MediaSoup] Send transport ICE connection state:', state));
         sendTransport.on('icegatheringstatechange', (state: any) => console.log('[MediaSoup] Send transport ICE gathering state:', state));
+
+        // Best-effort: listen for ICE candidate errors (private API access)
+        try {
+            const pc = getPeerConnectionFromTransport(sendTransport);
+            if (pc) {
+                pc.addEventListener('icecandidateerror', (ev: any) => {
+                    console.warn('[MediaSoup] Send pc icecandidateerror', {
+                        errorCode: ev?.errorCode,
+                        errorText: ev?.errorText,
+                        url: ev?.url,
+                        address: ev?.address,
+                        port: ev?.port,
+                        hostCandidate: ev?.hostCandidate
+                    });
+                });
+            }
+        } catch (e) {}
     } catch (e) {
         console.warn('[MediaSoup] sendTransport state event attach failed:', e);
     }
@@ -463,9 +606,44 @@ export async function initMediasoupForRoom (roomId: string) {
 
     // Log transport state changes for debugging
     try {
-        recvTransport.on('connectionstatechange', (state: any) => console.log('[MediaSoup] Recv transport connection state:', state));
+        recvTransport.on('connectionstatechange', (state: any) => {
+            console.log('[MediaSoup] Recv transport connection state:', state);
+            if (state === 'connecting') {
+                setTimeout(() => {
+                    try {
+                        if ((recvTransport as any).connectionState === 'connecting') {
+                            console.warn('[MediaSoup] Recv transport stuck in connecting; dumping ICE diagnostics');
+                            void dumpTransportIceDiagnostics('[MediaSoup] RECV transport (stuck connecting)', recvTransport);
+                        }
+                    } catch (e) {}
+                }, 6000);
+            }
+            if (state === 'failed') {
+                try {
+                    console.log('[MediaSoup] RECV transport failed — debug snapshot', (recvTransport as any).__debug);
+                    console.log('[MediaSoup] RECV transport failed — debug snapshot JSON', safeStringify((recvTransport as any).__debug));
+                } catch (e) {}
+                void dumpTransportIceDiagnostics('[MediaSoup] RECV transport failed', recvTransport);
+            }
+        });
         recvTransport.on('iceconnectionstatechange', (state: any) => console.log('[MediaSoup] Recv transport ICE connection state:', state));
         recvTransport.on('icegatheringstatechange', (state: any) => console.log('[MediaSoup] Recv transport ICE gathering state:', state));
+
+        try {
+            const pc = getPeerConnectionFromTransport(recvTransport);
+            if (pc) {
+                pc.addEventListener('icecandidateerror', (ev: any) => {
+                    console.warn('[MediaSoup] Recv pc icecandidateerror', {
+                        errorCode: ev?.errorCode,
+                        errorText: ev?.errorText,
+                        url: ev?.url,
+                        address: ev?.address,
+                        port: ev?.port,
+                        hostCandidate: ev?.hostCandidate
+                    });
+                });
+            }
+        } catch (e) {}
     } catch (e) {
         console.warn('[MediaSoup] recvTransport state event attach failed:', e);
     }
