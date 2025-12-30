@@ -358,6 +358,32 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
             if (typeof maybeGetStats === 'function') {
                 (consumer as any).getStats().then((stats: any) => {
                     console.log('[MediaSoup] Consumer getStats result:', stats);
+                    try {
+                        // Parse RTCStatsReport or plain object to extract useful metrics
+                        let totalBytesReceived = 0;
+                        if (typeof stats?.forEach === 'function') {
+                            stats.forEach((stat: any) => {
+                                // inbound-rtp entries carry bytesReceived in modern browsers
+                                if (stat.type === 'inbound-rtp' || stat.type === 'inbound-rtp' /* keep both for clarity */) {
+                                    const bytes = Number(stat.bytesReceived ?? stat.bytes_received ?? 0) || 0;
+                                    totalBytesReceived += bytes;
+                                    console.log('[MediaSoup] inbound-rtp stat:', { id: stat.id, bytesReceived: bytes, packetsReceived: stat.packetsReceived ?? stat.packets_received });
+                                }
+                                // Older / different stats may surface track or transport entries
+                                if (stat.type === 'track' || stat.type === 'inbound-rtp') {
+                                    // log relevant track fields for debugging
+                                    console.log('[MediaSoup] track/rtp stat debug:', stat.type, stat);
+                                }
+                            });
+                        } else if (stats && typeof stats === 'object') {
+                            // Try to extract common fields
+                            const maybeBytes = stats?.bytesReceived ?? stats?.bytes_received ?? null;
+                            totalBytesReceived = Number(maybeBytes ?? 0) || 0;
+                        }
+                        console.log('[MediaSoup] Consumer totalBytesReceived:', totalBytesReceived);
+                    } catch (parseErr) {
+                        console.warn('[MediaSoup] Failed to parse consumer stats:', parseErr);
+                    }
                 }).catch((err: any) => {
                     console.warn('[MediaSoup] Consumer getStats failed:', err);
                 });
@@ -414,16 +440,31 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
             });
 
             if (statsAvailable) {
+                const stats = await (consumer as any).getStats();
+                console.log('[MediaSoup] Consumer stats:', stats);
+
+                // Parse stats to detect inbound bytes
                 try {
-                    const stats = await (consumer as any).getStats();
-                    console.log('[MediaSoup] Consumer stats:', stats);
-                    // If stats indicate bytesReceived === 0, we likely have server-side routing issue
-                    const bytes = stats?.bytesReceived ?? stats?.rtp?.bytesReceived ?? null;
-                    if (bytes === 0) {
-                        console.warn('[MediaSoup] Consumer reports 0 bytes received — likely server-side routing issue');
+                    let totalBytes = 0;
+                    if (typeof stats?.forEach === 'function') {
+                        stats.forEach((s: any) => {
+                            if (s.type === 'inbound-rtp') {
+                                const b = Number(s.bytesReceived ?? s.bytes_received ?? 0) || 0;
+                                totalBytes += b;
+                                console.log('[MediaSoup] Diagnostic inbound-rtp stat:', { id: s.id, bytesReceived: b, packetsReceived: s.packetsReceived ?? s.packets_received });
+                            }
+                        });
+                    } else if (stats && typeof stats === 'object') {
+                        totalBytes = Number(stats?.bytesReceived ?? stats?.bytes_received ?? 0) || 0;
                     }
-                } catch (err) {
-                    console.warn('[MediaSoup] Failed to read stats during diagnostic:', err);
+
+                    if (totalBytes === 0) {
+                        console.warn('[MediaSoup] Consumer reports 0 bytes received — likely server-side routing issue');
+                    } else {
+                        console.log('[MediaSoup] Consumer reports bytes received:', totalBytes);
+                    }
+                } catch (parseErr) {
+                    console.warn('[MediaSoup] Failed to parse diagnostic stats:', parseErr);
                 }
             }
 

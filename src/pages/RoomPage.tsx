@@ -102,13 +102,47 @@ export default function RoomPage () {
 
             // Try to resume suspended AudioContext
             try {
-                const audioCtx = (window as any).__mediasoupAudioContext;
+                let audioCtx = (window as any).__mediasoupAudioContext;
                 if (audioCtx && audioCtx.state === 'suspended') {
                     console.log('[Room] Found suspended AudioContext, resuming...');
-                    await audioCtx.resume();
-                    console.log('[Room] AudioContext resumed to state:', audioCtx.state);
+                    try {
+                        await audioCtx.resume();
+                        console.log('[Room] AudioContext resumed to state:', audioCtx.state);
+                    } catch (resumeErr) {
+                        console.error('[Room] AudioContext resume in user gesture failed:', resumeErr);
+                    }
                 } else if (audioCtx) {
                     console.log('[Room] AudioContext already in state:', audioCtx.state);
+                }
+
+                // If there's no AudioContext or it still remains suspended, create one now in the user gesture
+                if (!audioCtx || audioCtx.state === 'suspended') {
+                    try {
+                        audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                        (window as any).__mediasoupAudioContext = audioCtx;
+                        console.log('[Room] Created new AudioContext in user gesture:', audioCtx.state);
+
+                        // Attach WebAudio chain for any remote audio elements that aren't wired yet
+                        for (const audio of remoteAudiosRef.current) {
+                            try {
+                                if (!audio || !audio.srcObject) continue;
+                                if ((audio as any).dataset?.webaudioAttached === 'true') continue;
+
+                                const source = audioCtx.createMediaStreamSource(audio.srcObject as MediaStream);
+                                const gainNode = audioCtx.createGain();
+                                gainNode.gain.value = 1.0;
+                                source.connect(gainNode);
+                                gainNode.connect(audioCtx.destination);
+
+                                (audio as any).dataset = { ...(audio as any).dataset, webaudioAttached: 'true' };
+                                console.log('[Room] Attached WebAudio for audio element', audio);
+                            } catch (attachErr) {
+                                console.warn('[Room] Failed to attach WebAudio for element:', attachErr);
+                            }
+                        }
+                    } catch (createErr) {
+                        console.error('[Room] Failed to create AudioContext in user gesture:', createErr);
+                    }
                 }
             } catch (e) {
                 console.error('[Room] Error resuming AudioContext:', e);
