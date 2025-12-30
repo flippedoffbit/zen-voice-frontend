@@ -58,6 +58,35 @@ function summarizeDtls (dtlsParameters: any) {
     };
 }
 
+function safeStringify (value: any, space: number | undefined = undefined, maxLen = 12000) {
+    const seen = new WeakSet<object>();
+    let str = '';
+    try {
+        str = JSON.stringify(
+            value,
+            (_k, v) => {
+                if (typeof v === 'bigint') return v.toString();
+                if (v && typeof v === 'object') {
+                    if (seen.has(v)) return '[Circular]';
+                    seen.add(v);
+                }
+                return v;
+            },
+            space
+        );
+    } catch (e) {
+        try {
+            str = String(value);
+        } catch (e2) {
+            str = '[unstringifiable]';
+        }
+    }
+    if (typeof str === 'string' && str.length > maxLen) {
+        return str.slice(0, maxLen) + `…(truncated ${ str.length - maxLen } chars)`;
+    }
+    return str;
+}
+
 function dumpRtcStatsSummary (label: string, stats: AnyRtcStats) {
     const values = statsValues(stats);
     const outboundAudio = values.find((s) => s?.type === 'outbound-rtp' && (s.kind === 'audio' || s.mediaType === 'audio'));
@@ -208,6 +237,7 @@ export async function initMediasoupForRoom (roomId: string) {
         10000
     );
     console.log('[MediaSoup] Received transport-created for send:', sendTransportOpts);
+    console.log('[MediaSoup] transport-created(send) JSON', safeStringify(sendTransportOpts));
     // Normalize transport id for compatibility with stub/real payloads
     const sendId = sendTransportOpts.transportId ?? sendTransportOpts.id ?? sendTransportOpts.transport_id;
     sendTransportOpts.transportId = sendId;
@@ -219,13 +249,15 @@ export async function initMediasoupForRoom (roomId: string) {
         console.log('[MediaSoup] Injected default ICE servers into send transport options');
     }
 
-    console.log('[MediaSoup] SEND transport options summary', {
+    const sendOptsSummary = {
         transportId: sendTransportOpts.transportId,
         iceServers: summarizeIceServers(sendTransportOpts.iceServers),
         iceCandidates: summarizeIceCandidates(sendTransportOpts.iceCandidates),
         iceParameters: sendTransportOpts.iceParameters ? { usernameFragment: sendTransportOpts.iceParameters.usernameFragment ? '[present]' : undefined } : undefined,
         dtlsParameters: sendTransportOpts.dtlsParameters ? summarizeDtls(sendTransportOpts.dtlsParameters) : undefined
-    });
+    };
+    console.log('[MediaSoup] SEND transport options summary', sendOptsSummary);
+    console.log('[MediaSoup] SEND transport options summary JSON', safeStringify(sendOptsSummary));
 
     const sendTransport = mediasoupClient.createSendTransport(sendTransportOpts, {
         connect: async (dtlsParameters: any) => {
@@ -325,6 +357,7 @@ export async function initMediasoupForRoom (roomId: string) {
         10000
     );
     console.log('[MediaSoup] Received transport-created for recv:', recvTransportOpts);
+    console.log('[MediaSoup] transport-created(recv) JSON', safeStringify(recvTransportOpts));
     // Normalize transport id for compatibility
     const recvId = recvTransportOpts.transportId ?? recvTransportOpts.id ?? recvTransportOpts.transport_id;
     recvTransportOpts.transportId = recvId;
@@ -336,13 +369,15 @@ export async function initMediasoupForRoom (roomId: string) {
         console.log('[MediaSoup] Injected default ICE servers into recv transport options');
     }
 
-    console.log('[MediaSoup] RECV transport options summary', {
+    const recvOptsSummary = {
         transportId: recvTransportOpts.transportId,
         iceServers: summarizeIceServers(recvTransportOpts.iceServers),
         iceCandidates: summarizeIceCandidates(recvTransportOpts.iceCandidates),
         iceParameters: recvTransportOpts.iceParameters ? { usernameFragment: recvTransportOpts.iceParameters.usernameFragment ? '[present]' : undefined } : undefined,
         dtlsParameters: recvTransportOpts.dtlsParameters ? summarizeDtls(recvTransportOpts.dtlsParameters) : undefined
-    });
+    };
+    console.log('[MediaSoup] RECV transport options summary', recvOptsSummary);
+    console.log('[MediaSoup] RECV transport options summary JSON', safeStringify(recvOptsSummary));
 
     const recvTransport = mediasoupClient.createRecvTransport(recvTransportOpts, {
         connect: async (dtlsParameters: any) => {
