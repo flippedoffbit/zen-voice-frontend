@@ -25,7 +25,16 @@ export async function initMediasoupForRoom (roomId: string) {
     // load device
     console.log('[MediaSoup] Loading device...');
     await mediasoupClient.loadDevice(capsPayload.capabilities);
-    console.log('[MediaSoup] Device loaded successfully');
+    const device = mediasoupClient.getDevice();
+    console.log('[MediaSoup] Device loaded successfully', {
+        canProduceAudio: device?.canProduce ? device.canProduce('audio') : false,
+        rtpCapabilities: device?.rtpCapabilities
+    });
+
+    // Ensure device has rtpCapabilities populated for consumption flows
+    if (!device || !device.rtpCapabilities) {
+        console.warn('[MediaSoup] Device or rtpCapabilities missing after load - consumption may fail');
+    }
 
     // create send transport
     socketClient.emit('create-transport', { roomId, direction: 'send' });
@@ -36,6 +45,12 @@ export async function initMediasoupForRoom (roomId: string) {
     const sendId = sendTransportOpts.transportId ?? sendTransportOpts.id ?? sendTransportOpts.transport_id;
     sendTransportOpts.transportId = sendId;
     sendTransportOpts.id = sendId;
+
+    // Ensure ICE servers are present for STUN/TURN
+    if (!sendTransportOpts.iceServers || (Array.isArray(sendTransportOpts.iceServers) && sendTransportOpts.iceServers.length === 0)) {
+        sendTransportOpts.iceServers = [ { urls: 'stun:stun.l.google.com:19302' } ];
+        console.log('[MediaSoup] Injected default ICE servers into send transport options');
+    }
 
     const sendTransport = mediasoupClient.createSendTransport(sendTransportOpts, {
         connect: async (dtlsParameters: any, callback?: Function, errback?: Function) => {
@@ -68,6 +83,15 @@ export async function initMediasoupForRoom (roomId: string) {
         }
     });
 
+    // Log transport state changes for debugging
+    try {
+        sendTransport.on('connectionstatechange', (state: any) => console.log('[MediaSoup] Send transport connection state:', state));
+        sendTransport.on('iceconnectionstatechange', (state: any) => console.log('[MediaSoup] Send transport ICE connection state:', state));
+        sendTransport.on('icegatheringstatechange', (state: any) => console.log('[MediaSoup] Send transport ICE gathering state:', state));
+    } catch (e) {
+        console.warn('[MediaSoup] sendTransport state event attach failed:', e);
+    }
+
     // create receive transport
     socketClient.emit('create-transport', { roomId, direction: 'recv' });
     console.log('[MediaSoup] Emitted create-transport recv for room:', roomId);
@@ -77,6 +101,12 @@ export async function initMediasoupForRoom (roomId: string) {
     const recvId = recvTransportOpts.transportId ?? recvTransportOpts.id ?? recvTransportOpts.transport_id;
     recvTransportOpts.transportId = recvId;
     recvTransportOpts.id = recvId;
+
+    // Ensure ICE servers are present for STUN/TURN
+    if (!recvTransportOpts.iceServers || (Array.isArray(recvTransportOpts.iceServers) && recvTransportOpts.iceServers.length === 0)) {
+        recvTransportOpts.iceServers = [ { urls: 'stun:stun.l.google.com:19302' } ];
+        console.log('[MediaSoup] Injected default ICE servers into recv transport options');
+    }
 
     const recvTransport = mediasoupClient.createRecvTransport(recvTransportOpts, {
         connect: async (dtlsParameters: any, callback?: Function, errback?: Function) => {
@@ -97,6 +127,15 @@ export async function initMediasoupForRoom (roomId: string) {
             }
         }
     });
+
+    // Log transport state changes for debugging
+    try {
+        recvTransport.on('connectionstatechange', (state: any) => console.log('[MediaSoup] Recv transport connection state:', state));
+        recvTransport.on('iceconnectionstatechange', (state: any) => console.log('[MediaSoup] Recv transport ICE connection state:', state));
+        recvTransport.on('icegatheringstatechange', (state: any) => console.log('[MediaSoup] Recv transport ICE gathering state:', state));
+    } catch (e) {
+        console.warn('[MediaSoup] recvTransport state event attach failed:', e);
+    }
 
     console.log('[MediaSoup] MediaSoup initialization complete');
     return { sendTransport, recvTransport, device: mediasoupClient.getDevice() };
@@ -303,8 +342,42 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
                 const newStream = new MediaStream([ consumer.track ]);
                 audio.srcObject = newStream;
                 console.log('[MediaSoup] reconsume: updated audio.srcObject');
-                // Try to play
-                try { await audio.play(); } catch (playErr) { console.warn('[MediaSoup] reconsume: audio.play failed', playErr); }
+
+                // Try to resume global AudioContext first (may be suspended)
+                try {
+                    const audioCtx = (window as any).__mediasoupAudioContext;
+                    if (audioCtx && audioCtx.state === 'suspended') {
+                        console.log('[MediaSoup] reconsume: attempting to resume global AudioContext in user gesture fallback');
+                        try {
+                            await audioCtx.resume();
+                            console.log('[MediaSoup] reconsume: AudioContext resumed:', audioCtx.state);
+                        } catch (resumeErr) {
+                            console.warn('[MediaSoup] reconsume: AudioContext resume failed:', resumeErr);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[MediaSoup] reconsume: error checking/resuming AudioContext', e);
+                }
+
+                // Try to play; if blocked by autoplay policy, attempt a muted play as a fallback
+                try {
+                    await audio.play();
+                    console.log('[MediaSoup] reconsume: audio.play succeeded');
+                } catch (playErr: any) {
+                    console.warn('[MediaSoup] reconsume: audio.play failed', playErr);
+                    if (playErr && (playErr.name === 'NotAllowedError' || playErr.message?.includes('not allowed'))) {
+                        // Try muted play to bypass autoplay restriction for diagnostic purposes
+                        try {
+                            audio.muted = true;
+                            await audio.play();
+                            console.log('[MediaSoup] reconsume: muted audio.play succeeded; will leave muted until user interaction');
+                            // Notify user that audio is muted due to autoplay restrictions
+                            try { toast('Audio enabled in muted mode due to autoplay restrictions. Click anywhere to unmute.'); } catch (tErr) {}
+                        } catch (mutedErr) {
+                            console.warn('[MediaSoup] reconsume: muted audio.play failed:', mutedErr);
+                        }
+                    }
+                }
             } catch (e) {
                 console.warn('[MediaSoup] reconsume: failed to attach new stream to audio', e);
             }
