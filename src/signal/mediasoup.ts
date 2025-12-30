@@ -14,6 +14,43 @@ function socketOnce<T = any> (event: string) {
     });
 }
 
+function socketOnceMatch<T = any> (
+    event: string,
+    predicate: (payload: T) => boolean,
+    timeoutMs = 10000
+) {
+    return new Promise<T>((resolve, reject) => {
+        let timeout: any;
+
+        const handler = (payload: T) => {
+            let matched = false;
+            try {
+                matched = predicate(payload);
+            } catch (e) {
+                // predicate errors should not break the listener; treat as non-match
+                matched = false;
+            }
+
+            if (!matched) return;
+
+            try { socketClient.off(event, handler as any); } catch (e) {}
+            if (timeout) clearTimeout(timeout);
+            resolve(payload);
+        };
+
+        socketClient.on(event, handler as any);
+
+        timeout = setTimeout(() => {
+            try { socketClient.off(event, handler as any); } catch (e) {}
+            reject(new Error(`[MediaSoup] Timeout waiting for ${ event }`));
+        }, timeoutMs);
+    });
+}
+
+function createRequestId (prefix: string) {
+    return `${ prefix }-${ Date.now() }-${ Math.random().toString(16).slice(2) }`;
+}
+
 export async function initMediasoupForRoom (roomId: string) {
     console.log('[MediaSoup] Initializing for room:', roomId);
     // ask server for router RTP capabilities via socket
@@ -37,9 +74,26 @@ export async function initMediasoupForRoom (roomId: string) {
     }
 
     // create send transport
-    socketClient.emit('create-transport', { roomId, direction: 'send' });
+    const sendTransportRequestId = createRequestId('create-transport-send');
+    socketClient.emit('create-transport', { roomId, direction: 'send', requestId: sendTransportRequestId });
     console.log('[MediaSoup] Emitted create-transport send for room:', roomId);
-    const sendTransportOpts = await socketOnce<any>('transport-created');
+    const sendTransportOpts = await socketOnceMatch<any>(
+        'transport-created',
+        (p) => {
+            const payloadRoomId = p?.roomId;
+            if (payloadRoomId && String(payloadRoomId) !== String(roomId)) return false;
+
+            const payloadRequestId = p?.requestId ?? p?.reqId;
+            if (payloadRequestId) return String(payloadRequestId) === String(sendTransportRequestId);
+
+            const payloadDirection = p?.direction ?? p?.transportDirection ?? p?.dir;
+            if (payloadDirection) return String(payloadDirection) === 'send';
+
+            // Fallback: accept the first transport-created event.
+            return true;
+        },
+        10000
+    );
     console.log('[MediaSoup] Received transport-created for send:', sendTransportOpts);
     // Normalize transport id for compatibility with stub/real payloads
     const sendId = sendTransportOpts.transportId ?? sendTransportOpts.id ?? sendTransportOpts.transport_id;
@@ -53,21 +107,30 @@ export async function initMediasoupForRoom (roomId: string) {
     }
 
     const sendTransport = mediasoupClient.createSendTransport(sendTransportOpts, {
-        connect: async (dtlsParameters: any, callback?: Function, errback?: Function) => {
+        connect: async (dtlsParameters: any) => {
             console.log('[MediaSoup] Connecting send transport with DTLS parameters');
             // inform server to connect transport (use normalized id)
             socketClient.emit('connect-transport', { transportId: sendTransportOpts.transportId, dtlsParameters, roomId });
             console.log('[MediaSoup] Emitted connect-transport for send transport:', sendTransportOpts.transportId);
             try {
-                await socketOnce<any>('transport-connected');
-                console.log('[MediaSoup] Send transport connected successfully');
-                try {
-                    console.log('[MediaSoup] Invoking send transport connect callback', { transportId: sendTransportOpts.transportId, timestamp: Date.now() });
-                    callback && callback();
-                } catch (e) { console.error('[MediaSoup] send connect callback threw:', e); }
+                const ack = await socketOnceMatch<any>(
+                    'transport-connected',
+                    (p) => {
+                        const ackId = p?.transportId ?? p?.id ?? p?.transport_id;
+                        // If server doesn't include an id, accept the first ack but log a warning.
+                        if (!ackId) return true;
+                        return String(ackId) === String(sendTransportOpts.transportId);
+                    },
+                    10000
+                );
+                const ackId = ack?.transportId ?? ack?.id ?? ack?.transport_id;
+                if (!ackId) {
+                    console.warn('[MediaSoup] transport-connected ack missing transportId; possible cross-ack risk');
+                }
+                console.log('[MediaSoup] Send transport connected successfully', { ackId, transportId: sendTransportOpts.transportId });
             } catch (err) {
                 console.error('[MediaSoup] Send transport connect error:', err);
-                try { errback && errback(err); } catch (e) {}
+                throw err;
             }
         },
         produce: async (kind: string, rtpParameters: any) => {
@@ -93,9 +156,25 @@ export async function initMediasoupForRoom (roomId: string) {
     }
 
     // create receive transport
-    socketClient.emit('create-transport', { roomId, direction: 'recv' });
+    const recvTransportRequestId = createRequestId('create-transport-recv');
+    socketClient.emit('create-transport', { roomId, direction: 'recv', requestId: recvTransportRequestId });
     console.log('[MediaSoup] Emitted create-transport recv for room:', roomId);
-    const recvTransportOpts = await socketOnce<any>('transport-created');
+    const recvTransportOpts = await socketOnceMatch<any>(
+        'transport-created',
+        (p) => {
+            const payloadRoomId = p?.roomId;
+            if (payloadRoomId && String(payloadRoomId) !== String(roomId)) return false;
+
+            const payloadRequestId = p?.requestId ?? p?.reqId;
+            if (payloadRequestId) return String(payloadRequestId) === String(recvTransportRequestId);
+
+            const payloadDirection = p?.direction ?? p?.transportDirection ?? p?.dir;
+            if (payloadDirection) return String(payloadDirection) === 'recv';
+
+            return true;
+        },
+        10000
+    );
     console.log('[MediaSoup] Received transport-created for recv:', recvTransportOpts);
     // Normalize transport id for compatibility
     const recvId = recvTransportOpts.transportId ?? recvTransportOpts.id ?? recvTransportOpts.transport_id;
@@ -109,21 +188,29 @@ export async function initMediasoupForRoom (roomId: string) {
     }
 
     const recvTransport = mediasoupClient.createRecvTransport(recvTransportOpts, {
-        connect: async (dtlsParameters: any, callback?: Function, errback?: Function) => {
+        connect: async (dtlsParameters: any) => {
             console.log('[MediaSoup] Connecting recv transport with DTLS parameters');
             // inform server to connect transport
             socketClient.emit('connect-transport', { transportId: recvTransportOpts.transportId, dtlsParameters, roomId });
             console.log('[MediaSoup] Emitted connect-transport for recv transport:', recvTransportOpts.transportId);
             try {
-                await socketOnce<any>('transport-connected');
-                console.log('[MediaSoup] Recv transport connected successfully');
-                try {
-                    console.log('[MediaSoup] Invoking recv transport connect callback', { transportId: recvTransportOpts.transportId, timestamp: Date.now() });
-                    callback && callback();
-                } catch (e) { console.error('[MediaSoup] recv connect callback threw:', e); }
+                const ack = await socketOnceMatch<any>(
+                    'transport-connected',
+                    (p) => {
+                        const ackId = p?.transportId ?? p?.id ?? p?.transport_id;
+                        if (!ackId) return true;
+                        return String(ackId) === String(recvTransportOpts.transportId);
+                    },
+                    10000
+                );
+                const ackId = ack?.transportId ?? ack?.id ?? ack?.transport_id;
+                if (!ackId) {
+                    console.warn('[MediaSoup] transport-connected ack missing transportId; possible cross-ack risk');
+                }
+                console.log('[MediaSoup] Recv transport connected successfully', { ackId, transportId: recvTransportOpts.transportId });
             } catch (err) {
                 console.error('[MediaSoup] Recv transport connect error:', err);
-                try { errback && errback(err); } catch (e) {}
+                throw err;
             }
         }
     });

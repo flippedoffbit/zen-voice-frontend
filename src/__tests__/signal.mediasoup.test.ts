@@ -35,16 +35,21 @@ describe('signal/mediasoup normalization', () => {
         (socketClient.once as any).mockImplementation((event: string, cb: any) => {
             // simulate server emitting the payload by invoking the callback
             if (event === 'router-rtp-capabilities') return setTimeout(() => cb({ capabilities: {} }), 0) as any;
+            if (event === 'transport-connected') return setTimeout(() => cb({ success: true }), 0) as any;
+            if (event === 'produced') return setTimeout(() => cb({ id: 'producer-1' }), 0) as any;
+            return setTimeout(() => cb({}), 0) as any;
+        });
+
+        // transport-created is now awaited via socket.on/off (socketOnceMatch)
+        (socketClient.on as any).mockImplementation((event: string, cb: any) => {
             if (event === 'transport-created') {
-                if (!(socketClient.once as any).__sendReturned) {
-                    (socketClient.once as any).__sendReturned = true;
+                if (!(socketClient.on as any).__sendReturned) {
+                    (socketClient.on as any).__sendReturned = true;
                     return setTimeout(() => cb({ id: 'send-transport-1' }), 0) as any;
                 }
                 return setTimeout(() => cb({ id: 'recv-transport-1' }), 0) as any;
             }
-            if (event === 'transport-connected') return setTimeout(() => cb({ success: true }), 0) as any;
-            if (event === 'produced') return setTimeout(() => cb({ id: 'producer-1' }), 0) as any;
-            return setTimeout(() => cb({}), 0) as any;
+            return undefined;
         });
 
         (mediasoupClient.loadDevice as any).mockResolvedValue(true);
