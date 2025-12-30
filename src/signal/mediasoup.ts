@@ -1,6 +1,7 @@
 import { socketClient } from '../socket/client';
 import { mediasoupClient } from '../mediasoup/client';
 import { ConsumeRequest, ConsumedResponse } from './types';
+import { toast } from 'react-hot-toast';
 
 function socketOnce<T = any> (event: string) {
     return new Promise<T>((resolve) => {
@@ -168,6 +169,46 @@ export async function startProducing (sendTransport: any) {
     console.log('[MediaSoup] Producing audio track...');
     const producer = await sendTransport.produce({ track });
     console.log('[MediaSoup] Audio producer created:', producer);
+
+    // Listen for server-side reports that consumers are receiving 0 bytes for this producer
+    const onConsumerZeroBytes = (payload: any) => {
+        try {
+            if (payload && payload.producerId && String(payload.producerId) === String(producer.id)) {
+                console.warn('[MediaSoup] (Sending side) Consumer reports 0 bytes received — likely server-side routing issue', payload);
+
+                // UI notification for sending user
+                try {
+                    toast.error('A listener reports no audio. Attempting to fix routing...');
+                } catch (tErr) {
+                    console.warn('[MediaSoup] Failed to show toast for consumer-zero-bytes:', tErr);
+                }
+
+                // Emit a server-side probe to attempt to refresh routing (server may optionally handle this)
+                try {
+                    socketClient.emit('producer-check-route', { producerId: producer.id, timestamp: Date.now() });
+                    console.log('[MediaSoup] Emitted producer-check-route for producer:', producer.id);
+                } catch (emitErr) {
+                    console.warn('[MediaSoup] Failed to emit producer-check-route:', emitErr);
+                }
+            }
+        } catch (e) {
+            console.warn('[MediaSoup] consumer-zero-bytes handler failed:', e);
+        }
+    };
+    socketClient.on('consumer-zero-bytes', onConsumerZeroBytes as any);
+
+    // Cleanup when producer stops
+    try {
+        (producer as any).on('transportclose', () => {
+            try { socketClient.off('consumer-zero-bytes', onConsumerZeroBytes as any); } catch (e) {}
+        });
+        (producer as any).on('close', () => {
+            try { socketClient.off('consumer-zero-bytes', onConsumerZeroBytes as any); } catch (e) {}
+        });
+    } catch (e) {
+        // Older mocks may not support .on
+    }
+
     return { producer, stream };
 }
 
@@ -207,7 +248,7 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
     // Consume the stream
     console.log('[MediaSoup] Calling recvTransport.consume()', { ts: Date.now() });
     const consumeStart = Date.now();
-    const consumer = await recvTransport.consume({
+    let consumer: any = await recvTransport.consume({
         id: payload.consumerId,
         producerId: payload.producerId, // Use producerId from response
         kind: payload.kind, // Use kind from response
@@ -216,6 +257,63 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
     const consumeResolved = Date.now();
     console.log('[MediaSoup] recvTransport.consume() resolved', { elapsedMs: consumeResolved - consumeStart, ts: consumeResolved });
     console.log('[MediaSoup] Consumer created:', consumer);
+
+    // helper for re-consuming in case 0-bytes detected
+    let reconsumeInProgress = false;
+    let reconsumeAttempts = 0;
+    const MAX_RECONSUME = 2;
+    const reconsume = async () => {
+        if (reconsumeInProgress) return;
+        if (reconsumeAttempts >= MAX_RECONSUME) return;
+        reconsumeAttempts++;
+        reconsumeInProgress = true;
+        console.log('[MediaSoup] Attempting re-consume attempt', reconsumeAttempts);
+        try {
+            try { consumer.close && consumer.close(); } catch (e) {}
+        } catch (e) {}
+
+        try {
+            // Emit a fresh consume request to server
+            socketClient.emit('consume', consumeRequest);
+            console.log('[MediaSoup] Re-emitted consume for producer:', producerId, 'attempt:', reconsumeAttempts);
+            const newPayload: ConsumedResponse = await socketOnce<ConsumedResponse>('consumed');
+            if (!newPayload || !newPayload.rtpParameters) {
+                console.warn('[MediaSoup] reconsume: server did not return valid consumed payload', newPayload);
+                reconsumeInProgress = false;
+                return;
+            }
+
+            const newRtp = newPayload.rtpParameters;
+            const newConsumer = await recvTransport.consume({
+                id: newPayload.consumerId,
+                producerId: newPayload.producerId,
+                kind: newPayload.kind,
+                rtpParameters: newRtp
+            });
+
+            consumer = newConsumer;
+            console.log('[MediaSoup] reconsume: new consumer created', { id: consumer.id });
+
+            if (consumer.paused) {
+                try { await consumer.resume(); } catch (e) { console.warn('[MediaSoup] reconsume resume failed:', e); }
+            }
+
+            // swap audio.srcObject to new stream
+            try {
+                const newStream = new MediaStream([ consumer.track ]);
+                audio.srcObject = newStream;
+                console.log('[MediaSoup] reconsume: updated audio.srcObject');
+                // Try to play
+                try { await audio.play(); } catch (playErr) { console.warn('[MediaSoup] reconsume: audio.play failed', playErr); }
+            } catch (e) {
+                console.warn('[MediaSoup] reconsume: failed to attach new stream to audio', e);
+            }
+        } catch (err) {
+            console.warn('[MediaSoup] reconsume attempt failed:', err);
+        } finally {
+            reconsumeInProgress = false;
+        }
+    };
     console.log('[MediaSoup] Consumer paused state:', consumer.paused);
 
     // CRITICAL: Resume the consumer to start receiving media
@@ -450,6 +548,7 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
 
     // Add periodic diagnostics to confirm whether we are receiving audio frames
     let diagnosticCount = 0;
+    let zeroReported = false;
     const diagnosticInterval = setInterval(async () => {
         try {
             diagnosticCount++;
@@ -488,6 +587,35 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
 
                     if (totalBytes === 0) {
                         console.warn('[MediaSoup] Consumer reports 0 bytes received — likely server-side routing issue');
+
+                        // Notify server so it can alert the producer/sender side (or log centrally)
+                        if (!zeroReported) {
+                            zeroReported = true;
+                            try {
+                                socketClient.emit('consumer-zero-bytes', {
+                                    roomId,
+                                    producerId: consumer.producerId,
+                                    consumerId: consumer.id,
+                                    timestamp: Date.now(),
+                                    totalBytes
+                                });
+                                console.log('[MediaSoup] Emitted consumer-zero-bytes to server for producer:', consumer.producerId);
+                            } catch (emitErr) {
+                                console.warn('[MediaSoup] Failed to emit consumer-zero-bytes:', emitErr);
+                            }
+                        }
+
+                        // Attempt local reconsume flow (try to recreate consumer)
+                        try {
+                            if (reconsumeAttempts < MAX_RECONSUME && !reconsumeInProgress) {
+                                console.log('[MediaSoup] Starting local reconsume attempt');
+                                setTimeout(() => { void reconsume(); }, 500);
+                            } else {
+                                console.log('[MediaSoup] Reconsume attempts exhausted or already in progress');
+                            }
+                        } catch (reErr) {
+                            console.warn('[MediaSoup] Failed to start reconsume:', reErr);
+                        }
                     } else {
                         console.log('[MediaSoup] Consumer reports bytes received:', totalBytes);
                     }
