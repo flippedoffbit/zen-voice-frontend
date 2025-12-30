@@ -143,6 +143,23 @@ function dumpRtcStatsSummary (label: string, stats: AnyRtcStats) {
             }
             : undefined
     });
+
+    // Compact line for copy/paste (DevTools often collapses objects)
+    try {
+        console.log(`${ label } compact`, {
+            outboundBytesSent: outboundAudio?.bytesSent,
+            outboundPacketsSent: outboundAudio?.packetsSent,
+            candidatePairState: selectedPair?.state,
+            candidatePairSelected: selectedPair?.selected,
+            candidatePairNominated: selectedPair?.nominated,
+            localCandidateType: localCand?.candidateType,
+            localIp: localCand?.ip ?? localCand?.address,
+            localPort: localCand?.port,
+            remoteCandidateType: remoteCand?.candidateType,
+            remoteIp: remoteCand?.ip ?? remoteCand?.address,
+            remotePort: remoteCand?.port
+        });
+    } catch (e) {}
 }
 
 function socketOnce<T = any> (event: string) {
@@ -317,6 +334,7 @@ export async function initMediasoupForRoom (roomId: string) {
             if (state === 'failed') {
                 try {
                     console.log('[MediaSoup] SEND transport failed — debug snapshot', (sendTransport as any).__debug);
+                    console.log('[MediaSoup] SEND transport failed — debug snapshot JSON', safeStringify((sendTransport as any).__debug));
                 } catch (e) {}
                 try {
                     if (typeof (sendTransport as any).getStats === 'function') {
