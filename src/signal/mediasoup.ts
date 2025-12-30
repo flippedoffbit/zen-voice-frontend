@@ -3,6 +3,119 @@ import { mediasoupClient } from '../mediasoup/client';
 import { ConsumeRequest, ConsumedResponse } from './types';
 import { toast } from 'react-hot-toast';
 
+type AnyRtcStats = any;
+
+function statsValues (stats: AnyRtcStats): any[] {
+    try {
+        const out: any[] = [];
+        if (!stats) return out;
+        if (typeof stats.forEach === 'function') {
+            stats.forEach((v: any) => out.push(v));
+            return out;
+        }
+        // Some polyfills return iterable of [id, stat]
+        if (typeof (stats as any)[ Symbol.iterator ] === 'function') {
+            for (const entry of stats as any) {
+                if (Array.isArray(entry) && entry.length >= 2) out.push(entry[ 1 ]);
+                else out.push(entry);
+            }
+        }
+        return out;
+    } catch (e) {
+        return [];
+    }
+}
+
+function summarizeIceServers (iceServers: any) {
+    if (!Array.isArray(iceServers)) return iceServers;
+    return iceServers.map((s) => ({
+        urls: s?.urls,
+        username: s?.username ? '[redacted]' : undefined,
+        credential: s?.credential ? '[redacted]' : undefined
+    }));
+}
+
+function summarizeIceCandidates (candidates: any) {
+    if (!Array.isArray(candidates)) return candidates;
+    return candidates.map((c) => ({
+        foundation: c?.foundation,
+        ip: c?.ip,
+        address: c?.address,
+        port: c?.port,
+        protocol: c?.protocol,
+        priority: c?.priority,
+        type: c?.type,
+        candidateType: c?.candidateType,
+        tcpType: c?.tcpType
+    }));
+}
+
+function summarizeDtls (dtlsParameters: any) {
+    const fp = Array.isArray(dtlsParameters?.fingerprints) ? dtlsParameters.fingerprints[ 0 ] : undefined;
+    return {
+        role: dtlsParameters?.role,
+        fingerprint: fp ? { algorithm: fp.algorithm, value: fp.value } : undefined
+    };
+}
+
+function dumpRtcStatsSummary (label: string, stats: AnyRtcStats) {
+    const values = statsValues(stats);
+    const outboundAudio = values.find((s) => s?.type === 'outbound-rtp' && (s.kind === 'audio' || s.mediaType === 'audio'));
+    const candidatePairs = values.filter((s) => s?.type === 'candidate-pair');
+    const selectedPair = candidatePairs.find((p) => p?.selected) || candidatePairs.find((p) => p?.nominated) || candidatePairs.find((p) => p?.state === 'succeeded');
+
+    let localCand: any;
+    let remoteCand: any;
+    if (selectedPair?.localCandidateId) localCand = values.find((s) => s?.id === selectedPair.localCandidateId);
+    if (selectedPair?.remoteCandidateId) remoteCand = values.find((s) => s?.id === selectedPair.remoteCandidateId);
+
+    console.log(label, {
+        outboundRtp: outboundAudio
+            ? {
+                bytesSent: outboundAudio.bytesSent,
+                packetsSent: outboundAudio.packetsSent,
+                ssrc: outboundAudio.ssrc,
+                active: outboundAudio.active,
+                roundTripTime: outboundAudio.roundTripTime
+            }
+            : undefined,
+        selectedCandidatePair: selectedPair
+            ? {
+                state: selectedPair.state,
+                nominated: selectedPair.nominated,
+                selected: selectedPair.selected,
+                writable: selectedPair.writable,
+                currentRoundTripTime: selectedPair.currentRoundTripTime,
+                totalRoundTripTime: selectedPair.totalRoundTripTime,
+                availableOutgoingBitrate: selectedPair.availableOutgoingBitrate,
+                bytesSent: selectedPair.bytesSent,
+                bytesReceived: selectedPair.bytesReceived,
+                localCandidateId: selectedPair.localCandidateId,
+                remoteCandidateId: selectedPair.remoteCandidateId
+            }
+            : undefined,
+        localCandidate: localCand
+            ? {
+                candidateType: localCand.candidateType,
+                protocol: localCand.protocol,
+                ip: localCand.ip ?? localCand.address,
+                port: localCand.port,
+                networkType: localCand.networkType,
+                relayProtocol: localCand.relayProtocol
+            }
+            : undefined,
+        remoteCandidate: remoteCand
+            ? {
+                candidateType: remoteCand.candidateType,
+                protocol: remoteCand.protocol,
+                ip: remoteCand.ip ?? remoteCand.address,
+                port: remoteCand.port,
+                relayProtocol: remoteCand.relayProtocol
+            }
+            : undefined
+    });
+}
+
 function socketOnce<T = any> (event: string) {
     return new Promise<T>((resolve) => {
         const handler = (payload: T) => {
@@ -106,9 +219,17 @@ export async function initMediasoupForRoom (roomId: string) {
         console.log('[MediaSoup] Injected default ICE servers into send transport options');
     }
 
+    console.log('[MediaSoup] SEND transport options summary', {
+        transportId: sendTransportOpts.transportId,
+        iceServers: summarizeIceServers(sendTransportOpts.iceServers),
+        iceCandidates: summarizeIceCandidates(sendTransportOpts.iceCandidates),
+        iceParameters: sendTransportOpts.iceParameters ? { usernameFragment: sendTransportOpts.iceParameters.usernameFragment ? '[present]' : undefined } : undefined,
+        dtlsParameters: sendTransportOpts.dtlsParameters ? summarizeDtls(sendTransportOpts.dtlsParameters) : undefined
+    });
+
     const sendTransport = mediasoupClient.createSendTransport(sendTransportOpts, {
         connect: async (dtlsParameters: any) => {
-            console.log('[MediaSoup] Connecting send transport with DTLS parameters');
+            console.log('[MediaSoup] Connecting send transport with DTLS parameters', summarizeDtls(dtlsParameters));
             // inform server to connect transport (use normalized id)
             socketClient.emit('connect-transport', { transportId: sendTransportOpts.transportId, dtlsParameters, roomId });
             console.log('[MediaSoup] Emitted connect-transport for send transport:', sendTransportOpts.transportId);
@@ -146,9 +267,37 @@ export async function initMediasoupForRoom (roomId: string) {
         }
     });
 
+    // Attach debug info for later stats dumps
+    try {
+        (sendTransport as any).__debug = {
+            roomId,
+            direction: 'send',
+            transportId: sendTransportOpts.transportId,
+            iceServers: summarizeIceServers(sendTransportOpts.iceServers),
+            iceCandidates: summarizeIceCandidates(sendTransportOpts.iceCandidates)
+        };
+    } catch (e) {}
+
     // Log transport state changes for debugging
     try {
-        sendTransport.on('connectionstatechange', (state: any) => console.log('[MediaSoup] Send transport connection state:', state));
+        sendTransport.on('connectionstatechange', async (state: any) => {
+            console.log('[MediaSoup] Send transport connection state:', state);
+            if (state === 'failed') {
+                try {
+                    console.log('[MediaSoup] SEND transport failed — debug snapshot', (sendTransport as any).__debug);
+                } catch (e) {}
+                try {
+                    if (typeof (sendTransport as any).getStats === 'function') {
+                        const tStats = await (sendTransport as any).getStats();
+                        dumpRtcStatsSummary('[MediaSoup] SEND transport getStats()', tStats);
+                    } else {
+                        console.warn('[MediaSoup] sendTransport.getStats() not available');
+                    }
+                } catch (e) {
+                    console.warn('[MediaSoup] Failed to dump sendTransport stats:', e);
+                }
+            }
+        });
         sendTransport.on('iceconnectionstatechange', (state: any) => console.log('[MediaSoup] Send transport ICE connection state:', state));
         sendTransport.on('icegatheringstatechange', (state: any) => console.log('[MediaSoup] Send transport ICE gathering state:', state));
     } catch (e) {
@@ -187,9 +336,17 @@ export async function initMediasoupForRoom (roomId: string) {
         console.log('[MediaSoup] Injected default ICE servers into recv transport options');
     }
 
+    console.log('[MediaSoup] RECV transport options summary', {
+        transportId: recvTransportOpts.transportId,
+        iceServers: summarizeIceServers(recvTransportOpts.iceServers),
+        iceCandidates: summarizeIceCandidates(recvTransportOpts.iceCandidates),
+        iceParameters: recvTransportOpts.iceParameters ? { usernameFragment: recvTransportOpts.iceParameters.usernameFragment ? '[present]' : undefined } : undefined,
+        dtlsParameters: recvTransportOpts.dtlsParameters ? summarizeDtls(recvTransportOpts.dtlsParameters) : undefined
+    });
+
     const recvTransport = mediasoupClient.createRecvTransport(recvTransportOpts, {
         connect: async (dtlsParameters: any) => {
-            console.log('[MediaSoup] Connecting recv transport with DTLS parameters');
+            console.log('[MediaSoup] Connecting recv transport with DTLS parameters', summarizeDtls(dtlsParameters));
             // inform server to connect transport
             socketClient.emit('connect-transport', { transportId: recvTransportOpts.transportId, dtlsParameters, roomId });
             console.log('[MediaSoup] Emitted connect-transport for recv transport:', recvTransportOpts.transportId);
@@ -214,6 +371,16 @@ export async function initMediasoupForRoom (roomId: string) {
             }
         }
     });
+
+    try {
+        (recvTransport as any).__debug = {
+            roomId,
+            direction: 'recv',
+            transportId: recvTransportOpts.transportId,
+            iceServers: summarizeIceServers(recvTransportOpts.iceServers),
+            iceCandidates: summarizeIceCandidates(recvTransportOpts.iceCandidates)
+        };
+    } catch (e) {}
 
     // Log transport state changes for debugging
     try {
@@ -295,6 +462,40 @@ export async function startProducing (sendTransport: any) {
     console.log('[MediaSoup] Producing audio track...');
     const producer = await sendTransport.produce({ track });
     console.log('[MediaSoup] Audio producer created:', producer);
+
+    // Periodically dump sender-side RTP stats so the user can share a single block of evidence.
+    try {
+        let dumpCount = 0;
+        const MAX_DUMPS = 10;
+        const intervalMs = 1500;
+        const timer = setInterval(async () => {
+            dumpCount++;
+            try {
+                const dbg = (sendTransport as any).__debug;
+                console.log('[MediaSoup] SENDER STATS DUMP', {
+                    dump: `${ dumpCount }/${ MAX_DUMPS }`,
+                    transport: dbg,
+                    producerId: producer?.id,
+                    transportConnectionState: (sendTransport as any).connectionState,
+                    t: Date.now()
+                });
+                if (producer && typeof (producer as any).getStats === 'function') {
+                    const pStats = await (producer as any).getStats();
+                    dumpRtcStatsSummary('[MediaSoup] producer.getStats()', pStats);
+                } else {
+                    console.warn('[MediaSoup] producer.getStats() not available');
+                }
+            } catch (e) {
+                console.warn('[MediaSoup] Failed to dump producer stats:', e);
+            }
+
+            if (dumpCount >= MAX_DUMPS) {
+                clearInterval(timer);
+            }
+        }, intervalMs);
+    } catch (e) {
+        console.warn('[MediaSoup] Failed to start sender stats dump interval:', e);
+    }
 
     // Listen for server-side reports that consumers are receiving 0 bytes for this producer
     const onConsumerZeroBytes = (payload: any) => {
