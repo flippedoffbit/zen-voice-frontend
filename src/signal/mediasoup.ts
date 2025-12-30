@@ -339,6 +339,38 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         }))
     });
 
+    // Attach diagnostic handlers to the consumer track to detect when data starts flowing
+    try {
+        const track = consumer.track;
+        track.addEventListener('unmute', () => {
+            console.log('[MediaSoup] Consumer track unmuted — media is being received');
+        });
+        track.addEventListener('mute', () => {
+            console.warn('[MediaSoup] Consumer track muted — no media is currently being received');
+        });
+        track.addEventListener('ended', () => {
+            console.warn('[MediaSoup] Consumer track ended');
+        });
+
+        // Try to read RTC stats if available (mediasoup-client may expose getStats)
+        try {
+            const maybeGetStats = (consumer as any).getStats;
+            if (typeof maybeGetStats === 'function') {
+                (consumer as any).getStats().then((stats: any) => {
+                    console.log('[MediaSoup] Consumer getStats result:', stats);
+                }).catch((err: any) => {
+                    console.warn('[MediaSoup] Consumer getStats failed:', err);
+                });
+            } else {
+                console.debug('[MediaSoup] consumer.getStats not available on this client build');
+            }
+        } catch (statsErr) {
+            console.warn('[MediaSoup] Error while attempting to get consumer stats:', statsErr);
+        }
+    } catch (trackErr) {
+        console.warn('[MediaSoup] Failed to attach track event listeners:', trackErr);
+    }
+
     // Try to play audio, but handle browser autoplay restrictions
     try {
         const playPromise = audio.play();
@@ -361,6 +393,48 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
             throw error;
         }
     }
+
+    // Add periodic diagnostics to confirm whether we are receiving audio frames
+    let diagnosticCount = 0;
+    const diagnosticInterval = setInterval(async () => {
+        try {
+            diagnosticCount++;
+            const track = consumer.track;
+            const statsAvailable = typeof (consumer as any).getStats === 'function';
+
+            console.log('[MediaSoup] Consumer diagnostic check', diagnosticCount, {
+                trackReadyState: track.readyState,
+                trackEnabled: track.enabled,
+                trackMuted: track.muted,
+                streamActive: remoteStream.active,
+                audioElementPaused: audio.paused,
+                audioElementReadyState: audio.readyState,
+                audioContextState: (window as any).__mediasoupAudioContext?.state || 'unknown',
+                statsAvailable
+            });
+
+            if (statsAvailable) {
+                try {
+                    const stats = await (consumer as any).getStats();
+                    console.log('[MediaSoup] Consumer stats:', stats);
+                    // If stats indicate bytesReceived === 0, we likely have server-side routing issue
+                    const bytes = stats?.bytesReceived ?? stats?.rtp?.bytesReceived ?? null;
+                    if (bytes === 0) {
+                        console.warn('[MediaSoup] Consumer reports 0 bytes received — likely server-side routing issue');
+                    }
+                } catch (err) {
+                    console.warn('[MediaSoup] Failed to read stats during diagnostic:', err);
+                }
+            }
+
+            if (diagnosticCount >= 10) {
+                clearInterval(diagnosticInterval);
+            }
+        } catch (diagErr) {
+            console.error('[MediaSoup] Diagnostic interval failed:', diagErr);
+            clearInterval(diagnosticInterval);
+        }
+    }, 1000);
 
     return { consumer, audio };
 }
