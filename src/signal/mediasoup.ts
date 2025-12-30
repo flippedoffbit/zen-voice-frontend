@@ -260,6 +260,19 @@ export async function initMediasoupForRoom (roomId: string) {
     sendTransportOpts.transportId = sendId;
     sendTransportOpts.id = sendId;
 
+    // Some backends nest iceServers under `_raw.iceServers`; prefer server-provided TURN/STUN when present.
+    try {
+        const nestedIceServers = sendTransportOpts?._raw?.iceServers ?? sendTransportOpts?.raw?.iceServers;
+        if ((!sendTransportOpts.iceServers || (Array.isArray(sendTransportOpts.iceServers) && sendTransportOpts.iceServers.length === 0))
+            && Array.isArray(nestedIceServers)
+            && nestedIceServers.length > 0) {
+            sendTransportOpts.iceServers = nestedIceServers;
+            console.log('[MediaSoup] Using server-provided iceServers from _raw for send transport');
+        }
+    } catch (e) {
+        // ignore
+    }
+
     // Ensure ICE servers are present for STUN/TURN
     if (!sendTransportOpts.iceServers || (Array.isArray(sendTransportOpts.iceServers) && sendTransportOpts.iceServers.length === 0)) {
         sendTransportOpts.iceServers = [ { urls: 'stun:stun.l.google.com:19302' } ];
@@ -380,6 +393,19 @@ export async function initMediasoupForRoom (roomId: string) {
     const recvId = recvTransportOpts.transportId ?? recvTransportOpts.id ?? recvTransportOpts.transport_id;
     recvTransportOpts.transportId = recvId;
     recvTransportOpts.id = recvId;
+
+    // Some backends nest iceServers under `_raw.iceServers`; prefer server-provided TURN/STUN when present.
+    try {
+        const nestedIceServers = recvTransportOpts?._raw?.iceServers ?? recvTransportOpts?.raw?.iceServers;
+        if ((!recvTransportOpts.iceServers || (Array.isArray(recvTransportOpts.iceServers) && recvTransportOpts.iceServers.length === 0))
+            && Array.isArray(nestedIceServers)
+            && nestedIceServers.length > 0) {
+            recvTransportOpts.iceServers = nestedIceServers;
+            console.log('[MediaSoup] Using server-provided iceServers from _raw for recv transport');
+        }
+    } catch (e) {
+        // ignore
+    }
 
     // Ensure ICE servers are present for STUN/TURN
     if (!recvTransportOpts.iceServers || (Array.isArray(recvTransportOpts.iceServers) && recvTransportOpts.iceServers.length === 0)) {
