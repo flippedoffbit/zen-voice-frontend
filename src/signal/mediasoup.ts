@@ -37,13 +37,22 @@ export async function initMediasoupForRoom (roomId: string) {
     sendTransportOpts.id = sendId;
 
     const sendTransport = mediasoupClient.createSendTransport(sendTransportOpts, {
-        connect: async (dtlsParameters: any) => {
+        connect: async (dtlsParameters: any, callback?: Function, errback?: Function) => {
             console.log('[MediaSoup] Connecting send transport with DTLS parameters');
             // inform server to connect transport (use normalized id)
             socketClient.emit('connect-transport', { transportId: sendTransportOpts.transportId, dtlsParameters, roomId });
             console.log('[MediaSoup] Emitted connect-transport for send transport:', sendTransportOpts.transportId);
-            await socketOnce<any>('transport-connected');
-            console.log('[MediaSoup] Send transport connected successfully');
+            try {
+                await socketOnce<any>('transport-connected');
+                console.log('[MediaSoup] Send transport connected successfully');
+                try {
+                    console.log('[MediaSoup] Invoking send transport connect callback', { transportId: sendTransportOpts.transportId, timestamp: Date.now() });
+                    callback && callback();
+                } catch (e) { console.error('[MediaSoup] send connect callback threw:', e); }
+            } catch (err) {
+                console.error('[MediaSoup] Send transport connect error:', err);
+                try { errback && errback(err); } catch (e) {}
+            }
         },
         produce: async (kind: string, rtpParameters: any) => {
             console.log('[MediaSoup] Producing', kind, 'with RTP parameters');
@@ -69,13 +78,22 @@ export async function initMediasoupForRoom (roomId: string) {
     recvTransportOpts.id = recvId;
 
     const recvTransport = mediasoupClient.createRecvTransport(recvTransportOpts, {
-        connect: async (dtlsParameters: any) => {
+        connect: async (dtlsParameters: any, callback?: Function, errback?: Function) => {
             console.log('[MediaSoup] Connecting recv transport with DTLS parameters');
             // inform server to connect transport
             socketClient.emit('connect-transport', { transportId: recvTransportOpts.transportId, dtlsParameters, roomId });
             console.log('[MediaSoup] Emitted connect-transport for recv transport:', recvTransportOpts.transportId);
-            await socketOnce<any>('transport-connected');
-            console.log('[MediaSoup] Recv transport connected successfully');
+            try {
+                await socketOnce<any>('transport-connected');
+                console.log('[MediaSoup] Recv transport connected successfully');
+                try {
+                    console.log('[MediaSoup] Invoking recv transport connect callback', { transportId: recvTransportOpts.transportId, timestamp: Date.now() });
+                    callback && callback();
+                } catch (e) { console.error('[MediaSoup] recv connect callback threw:', e); }
+            } catch (err) {
+                console.error('[MediaSoup] Recv transport connect error:', err);
+                try { errback && errback(err); } catch (e) {}
+            }
         }
     });
 
@@ -163,12 +181,16 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
         transportId: recvTransport.id,
         roomId
     };
+    const flowStart = Date.now();
+    console.log('[MediaSoup] Consume flow start', { producerId, roomId, transportId: recvTransport.id, t: flowStart });
+
     socketClient.emit('consume', consumeRequest);
-    console.log('[MediaSoup] Emitted consume for producer:', producerId, 'on transport:', recvTransport.id);
+    console.log('[MediaSoup] Emitted consume for producer:', producerId, 'on transport:', recvTransport.id, 'at', Date.now());
 
     // Wait for consumer data
     const payload: ConsumedResponse = await socketOnce<ConsumedResponse>('consumed');
-    console.log('[MediaSoup] Received consumed:', payload);
+    const consumedAt = Date.now();
+    console.log('[MediaSoup] Received consumed:', payload, { consumedAt, elapsedMs: consumedAt - flowStart });
 
     // Validate response
     if (!payload.consumerId || !payload.id || !payload.producerId) {
@@ -183,21 +205,27 @@ export async function consumeProducer (recvTransport: any, producerId: string, r
     }
 
     // Consume the stream
+    console.log('[MediaSoup] Calling recvTransport.consume()', { ts: Date.now() });
+    const consumeStart = Date.now();
     const consumer = await recvTransport.consume({
         id: payload.consumerId,
         producerId: payload.producerId, // Use producerId from response
         kind: payload.kind, // Use kind from response
         rtpParameters: rtpParams
     });
+    const consumeResolved = Date.now();
+    console.log('[MediaSoup] recvTransport.consume() resolved', { elapsedMs: consumeResolved - consumeStart, ts: consumeResolved });
     console.log('[MediaSoup] Consumer created:', consumer);
     console.log('[MediaSoup] Consumer paused state:', consumer.paused);
 
     // CRITICAL: Resume the consumer to start receiving media
     // Consumers are created in paused state by default
     if (consumer.paused) {
-        console.log('[MediaSoup] Resuming consumer...');
+        console.log('[MediaSoup] Resuming consumer... at', Date.now());
+        const resumeStart = Date.now();
         await consumer.resume();
-        console.log('[MediaSoup] Consumer resumed successfully');
+        const resumeDone = Date.now();
+        console.log('[MediaSoup] Consumer resumed successfully', { elapsedMs: resumeDone - resumeStart, resumeDone, totalFlowMs: resumeDone - flowStart });
     }
 
     console.log('[MediaSoup] Consumer track:', consumer.track);
